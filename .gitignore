@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.turbo/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.local
+.DS_Store
+.wrangler/
+supabase/.branches/
+supabase/.temp/
