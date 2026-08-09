@@ -1,0 +1,17 @@
+name = "kabu-quant"
+main = "src/index.ts"
+compatibility_date = "2026-08-05"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+
+[observability]
+enabled = true
+
+[triggers]
+crons = []   # 重い処理(バックテスト/DSR/PBO)はGitHub Actionsで実行するため空
+
+# Secrets are set via `wrangler secret put <NAME>` — never commit them here:
+#   SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_JWT_SECRET

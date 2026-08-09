@@ -1,0 +1,97 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0e14;
+  --surface: #131722;
+  --border: #232733;
+  --text: #e6e9ef;
+  --text-dim: #8b93a7;
+  --accent: #4f8cff;
+  --ok: #2ecc71;
+  --err: #ff5c5c;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+.banner {
+  background: #2a2410;
+  border: 1px solid #5a4c1a;
+  color: #e8d27a;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  color: var(--text-dim);
+  margin: 4px 0 32px;
+}
+
+.status-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.status-card h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  color: var(--text-dim);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status {
+  font-size: 15px;
+}
+
+.status-ok {
+  color: var(--ok);
+}
+
+.status-error {
+  color: var(--err);
+}
+
+.status-detail {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.status-detail dt {
+  color: var(--text-dim);
+}
+
+.status-detail dd {
+  margin: 0;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
