@@ -143,14 +143,20 @@ def normalize_security(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_daily_quote(raw: dict[str, Any]) -> dict[str, Any]:
+    # Field names confirmed 2026-08-12 against a live Free-plan account, same
+    # short-abbreviation convention as /equities/master (O/H/L/C, not
+    # Open/High/Low/Close). AdjC/AdjFactor map onto columns the design
+    # blueprint's schema already had but the original guessed names never hit.
     return {
         "code": pad_security_code(raw.get("Code") or raw.get("code") or ""),
         "date": raw.get("Date") or raw.get("date"),
-        "open": raw.get("Open"),
-        "high": raw.get("High"),
-        "low": raw.get("Low"),
-        "close": raw.get("Close"),
-        "volume": raw.get("Volume"),
-        "turnover_value": raw.get("TurnoverValue"),
+        "open": raw.get("O") if "O" in raw else raw.get("Open"),
+        "high": raw.get("H") if "H" in raw else raw.get("High"),
+        "low": raw.get("L") if "L" in raw else raw.get("Low"),
+        "close": raw.get("C") if "C" in raw else raw.get("Close"),
+        "volume": raw.get("Vo") if "Vo" in raw else raw.get("Volume"),
+        "turnover_value": raw.get("Va") if "Va" in raw else raw.get("TurnoverValue"),
+        "adj_factor": raw.get("AdjFactor", 1.0),
+        "adj_close": raw.get("AdjC"),
         "known_from": now_utc_iso(),
     }

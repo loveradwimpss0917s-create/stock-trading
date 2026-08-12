@@ -135,11 +135,39 @@ def test_normalize_security_maps_live_confirmed_fields_and_pads_code():
     assert row["scale_category"] == "TOPIX Small 1"
 
 
-def test_normalize_daily_quote_maps_fields_and_stamps_known_from():
-    raw = {"Code": "72030", "Date": "2026-01-05", "Open": 100, "Close": 105}
+def test_normalize_daily_quote_maps_live_confirmed_fields_and_stamps_known_from():
+    # Field names confirmed 2026-08-12 against a live Free-plan account —
+    # abbreviated O/H/L/C/Vo/Va, not the Open/High/Low/Close/Volume names
+    # the design blueprint assumed.
+    raw = {
+        "Code": "13010",
+        "Date": "2024-08-13",
+        "O": 3740.0,
+        "H": 3800.0,
+        "L": 3740.0,
+        "C": 3795.0,
+        "Vo": 22300.0,
+        "Va": 84170500.0,
+        "AdjFactor": 1.0,
+        "AdjC": 3795.0,
+    }
     row = normalize_daily_quote(raw)
-    assert row["code"] == "72030"
-    assert row["date"] == "2026-01-05"
-    assert row["open"] == 100
-    assert row["close"] == 105
+    assert row["code"] == "13010"
+    assert row["date"] == "2024-08-13"
+    assert row["open"] == 3740.0
+    assert row["high"] == 3800.0
+    assert row["low"] == 3740.0
+    assert row["close"] == 3795.0
+    assert row["volume"] == 22300.0
+    assert row["turnover_value"] == 84170500.0
+    assert row["adj_factor"] == 1.0
+    assert row["adj_close"] == 3795.0
     assert row["known_from"]  # stamped, non-empty
+
+
+def test_normalize_daily_quote_preserves_a_real_zero_volume():
+    # Vo=0 is a legitimate "no trades that day" value, not a missing field —
+    # must not be treated the same as absent.
+    raw = {"Code": "13010", "Date": "2024-08-13", "O": 100, "H": 100, "L": 100, "C": 100, "Vo": 0}
+    row = normalize_daily_quote(raw)
+    assert row["volume"] == 0
