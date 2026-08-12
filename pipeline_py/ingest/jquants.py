@@ -10,14 +10,26 @@ Do not confuse this with the separate corporate "J-Quants Pro" product
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Iterator, Optional
 
 import httpx
 
-from .common import TokenBucketRateLimiter, now_utc_iso, pad_security_code, retry_with_backoff
+from .common import RetryExhausted, TokenBucketRateLimiter, now_utc_iso, pad_security_code, retry_with_backoff
 
 BASE_URL = "https://api.jquants.com/v2"
 FREE_PLAN_RATE_LIMIT_PER_MIN = 5
+
+# Matches the body of the 400 /equities/bars/daily returns when the
+# requested range exceeds what the plan's rolling window covers, e.g.:
+#   "Your subscription covers the following dates: 2024-05-20 ~ 2026-05-20."
+# Confirmed live 2026-08-12; ~12 weeks behind today, matching the design
+# blueprint's stated Free-plan delay — but read from the API's own error
+# rather than hardcoded, since the exact window isn't documented anywhere
+# we could verify ahead of time.
+_SUBSCRIPTION_RANGE_RE = re.compile(
+    r"subscription covers the following dates: (\d{4}-\d{2}-\d{2}) ~ (\d{4}-\d{2}-\d{2})"
+)
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -82,7 +94,25 @@ class JQuantsClient:
 
     def fetch_daily_quotes(self, code: str, date_from: str, date_to: str) -> list[dict[str, Any]]:
         params = {"code": pad_security_code(code), "from": date_from, "to": date_to}
-        return list(self._get_paginated("/equities/bars/daily", params, "data"))
+        try:
+            return list(self._get_paginated("/equities/bars/daily", params, "data"))
+        except RetryExhausted as exc:
+            cause = exc.__cause__
+            if not isinstance(cause, httpx.HTTPStatusError) or cause.response.status_code != 400:
+                raise
+            match = _SUBSCRIPTION_RANGE_RE.search(cause.response.text)
+            if not match:
+                raise
+            allowed_from, allowed_to = match.groups()
+            clamped_from = max(date_from, allowed_from)
+            clamped_to = min(date_to, allowed_to)
+            print(
+                f"[jquants] requested range {date_from}~{date_to} exceeds plan "
+                f"coverage; retrying clamped to {clamped_from}~{clamped_to}",
+                flush=True,
+            )
+            clamped_params = {"code": pad_security_code(code), "from": clamped_from, "to": clamped_to}
+            return list(self._get_paginated("/equities/bars/daily", clamped_params, "data"))
 
     def fetch_fins_summary(self, code: str) -> list[dict[str, Any]]:
         params = {"code": pad_security_code(code)}

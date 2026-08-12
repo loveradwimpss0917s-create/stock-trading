@@ -52,6 +52,42 @@ def test_fetch_daily_quotes_pads_4_digit_code_to_5():
 
 
 @respx.mock
+def test_fetch_daily_quotes_clamps_to_plan_coverage_on_400():
+    # Live-confirmed 2026-08-12: requesting a range wider than the plan's
+    # rolling window returns 400 with a message naming the actual covered
+    # range. fetch_daily_quotes should parse it and retry clamped, instead
+    # of surfacing the error to the caller.
+    route = respx.get(f"{BASE_URL}/equities/bars/daily").mock(
+        side_effect=[
+            httpx.Response(
+                400,
+                json={
+                    "message": "Your subscription covers the following dates: "
+                    "2024-05-20 ~ 2026-05-20. If you want more data, please "
+                    "check other plans:https://jpx-jquants.com/#dataset"
+                },
+            ),
+            httpx.Response(200, json={"data": [{"Code": "72030", "Date": "2026-05-20"}]}),
+        ]
+    )
+    client = JQuantsClient(api_key="test-key")
+    import pipeline_py.ingest.common as common_mod
+
+    original_sleep = common_mod.time.sleep
+    common_mod.time.sleep = lambda seconds: None
+    try:
+        result = client.fetch_daily_quotes("72030", "2024-08-12", "2026-08-12")
+    finally:
+        common_mod.time.sleep = original_sleep
+        client.close()
+
+    assert result == [{"Code": "72030", "Date": "2026-05-20"}]
+    retried_params = dict(route.calls[1].request.url.params)
+    assert retried_params["from"] == "2024-08-12"  # requested start was within range
+    assert retried_params["to"] == "2026-05-20"  # end clamped to plan coverage
+
+
+@respx.mock
 def test_retries_on_429_then_succeeds():
     respx.get(f"{BASE_URL}/equities/master").mock(
         side_effect=[
