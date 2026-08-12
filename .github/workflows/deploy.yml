@@ -19,3 +19,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/api
+          # Uploaded as Worker secrets rather than committed as [vars]:
+          # the anon key is RLS-protected and safe in a browser, but keeping
+          # it out of a public repo keeps rotation to one place.
+          secrets: |
+            SUPABASE_URL
+            SUPABASE_ANON_KEY
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
