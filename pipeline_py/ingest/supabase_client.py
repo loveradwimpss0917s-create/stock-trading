@@ -47,4 +47,11 @@ class SupabaseUpsertClient:
                 "Prefer": "resolution=merge-duplicates,return=minimal",
             },
         )
+        if resp.status_code >= 400:
+            print(
+                f"[supabase] {resp.status_code} upserting {len(rows)} rows into "
+                f"{table} (on_conflict={on_conflict}): {resp.text[:1000]}",
+                flush=True,
+            )
+            print(f"[supabase] first row sample: {rows[0]}", flush=True)
         resp.raise_for_status()
