@@ -142,11 +142,22 @@ def normalize_security(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _as_bigint(value: Any) -> Optional[int]:
+    """J-Quants returns volume/turnover as JSON floats (e.g. 84170500.0);
+    the daily_quotes schema stores them as bigint, and Postgres rejects a
+    literal with a decimal point ("invalid input syntax for type bigint") —
+    confirmed live 2026-08-12. Truncating via int() is safe here since these
+    are whole-share/yen counts represented with a spurious ".0"."""
+    return None if value is None else int(value)
+
+
 def normalize_daily_quote(raw: dict[str, Any]) -> dict[str, Any]:
     # Field names confirmed 2026-08-12 against a live Free-plan account, same
     # short-abbreviation convention as /equities/master (O/H/L/C, not
     # Open/High/Low/Close). AdjC/AdjFactor map onto columns the design
     # blueprint's schema already had but the original guessed names never hit.
+    volume = raw.get("Vo") if "Vo" in raw else raw.get("Volume")
+    turnover_value = raw.get("Va") if "Va" in raw else raw.get("TurnoverValue")
     return {
         "code": pad_security_code(raw.get("Code") or raw.get("code") or ""),
         "date": raw.get("Date") or raw.get("date"),
@@ -154,8 +165,8 @@ def normalize_daily_quote(raw: dict[str, Any]) -> dict[str, Any]:
         "high": raw.get("H") if "H" in raw else raw.get("High"),
         "low": raw.get("L") if "L" in raw else raw.get("Low"),
         "close": raw.get("C") if "C" in raw else raw.get("Close"),
-        "volume": raw.get("Vo") if "Vo" in raw else raw.get("Volume"),
-        "turnover_value": raw.get("Va") if "Va" in raw else raw.get("TurnoverValue"),
+        "volume": _as_bigint(volume),
+        "turnover_value": _as_bigint(turnover_value),
         "adj_factor": raw.get("AdjFactor", 1.0),
         "adj_close": raw.get("AdjC"),
         "known_from": now_utc_iso(),

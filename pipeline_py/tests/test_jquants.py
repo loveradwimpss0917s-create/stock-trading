@@ -158,8 +158,12 @@ def test_normalize_daily_quote_maps_live_confirmed_fields_and_stamps_known_from(
     assert row["high"] == 3800.0
     assert row["low"] == 3740.0
     assert row["close"] == 3795.0
-    assert row["volume"] == 22300.0
-    assert row["turnover_value"] == 84170500.0
+    # bigint columns: J-Quants sends these as floats (22300.0), which
+    # Postgres rejects for bigint ("invalid input syntax") — confirmed live.
+    assert row["volume"] == 22300
+    assert isinstance(row["volume"], int)
+    assert row["turnover_value"] == 84170500
+    assert isinstance(row["turnover_value"], int)
     assert row["adj_factor"] == 1.0
     assert row["adj_close"] == 3795.0
     assert row["known_from"]  # stamped, non-empty
