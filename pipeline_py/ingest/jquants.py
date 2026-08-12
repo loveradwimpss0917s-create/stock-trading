@@ -18,7 +18,17 @@ import httpx
 from .common import RetryExhausted, TokenBucketRateLimiter, now_utc_iso, pad_security_code, retry_with_backoff
 
 BASE_URL = "https://api.jquants.com/v2"
-FREE_PLAN_RATE_LIMIT_PER_MIN = 5
+# Documented as 5/min, but headroom below that (rather than exactly 5)
+# avoids skimming the edge of the server's own window on every call.
+FREE_PLAN_RATE_LIMIT_PER_MIN = 4
+# Confirmed live 2026-08-12: sustained bursts near the limit trigger a
+# multi-minute block, not just a same-second 429 — matching the design
+# blueprint's own "大幅超過で約5分ブロック" caveat. 2s/4s/8s/16s backoff
+# (the default) gives up in ~30s, nowhere near long enough to ride that
+# out, so 429s specifically get a much longer allowance.
+RATE_LIMIT_RETRY_BASE_DELAY = 10.0
+RATE_LIMIT_RETRY_MAX_DELAY = 90.0
+RATE_LIMIT_RETRY_MAX_ATTEMPTS = 7  # 10+20+40+80+90+90 ≈ 5.5 min of headroom
 
 # Matches the body of the 400 /equities/bars/daily returns when the
 # requested range exceeds what the plan's rolling window covers, e.g.:
@@ -76,7 +86,13 @@ class JQuantsClient:
             resp.raise_for_status()
             return resp.json()
 
-        return retry_with_backoff(_do, should_retry=_is_retryable)
+        return retry_with_backoff(
+            _do,
+            should_retry=_is_retryable,
+            base_delay=RATE_LIMIT_RETRY_BASE_DELAY,
+            max_delay=RATE_LIMIT_RETRY_MAX_DELAY,
+            max_attempts=RATE_LIMIT_RETRY_MAX_ATTEMPTS,
+        )
 
     def _get_paginated(self, path: str, params: dict[str, Any], items_key: str) -> Iterator[dict[str, Any]]:
         query = dict(params)
