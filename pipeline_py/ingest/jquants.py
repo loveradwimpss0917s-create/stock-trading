@@ -56,6 +56,11 @@ class JQuantsClient:
         def _do() -> dict[str, Any]:
             self._limiter.acquire()
             resp = self.client.get(path, params=params, headers={"x-api-key": self.api_key})
+            if resp.status_code >= 400:
+                # Non-retryable errors (4xx other than 429) never surface their
+                # body otherwise — and that body is usually the only way to
+                # know *which* param/format the API actually rejected.
+                print(f"[jquants] {resp.status_code} from {path} params={params}: {resp.text[:1000]}", flush=True)
             resp.raise_for_status()
             return resp.json()
 
