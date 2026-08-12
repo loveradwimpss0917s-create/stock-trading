@@ -73,30 +73,37 @@ class JQuantsClient:
             query["pagination_key"] = pagination_key
 
     def fetch_equities_master(self) -> list[dict[str, Any]]:
-        return list(self._get_paginated("/equities/master", {}, "equities"))
+        return list(self._get_paginated("/equities/master", {}, "data"))
 
     def fetch_daily_quotes(self, code: str, date_from: str, date_to: str) -> list[dict[str, Any]]:
         params = {"code": pad_security_code(code), "from": date_from, "to": date_to}
-        return list(self._get_paginated("/equities/bars/daily", params, "daily_quotes"))
+        return list(self._get_paginated("/equities/bars/daily", params, "data"))
 
     def fetch_fins_summary(self, code: str) -> list[dict[str, Any]]:
         params = {"code": pad_security_code(code)}
-        return list(self._get_paginated("/fins/summary", params, "summaries"))
+        return list(self._get_paginated("/fins/summary", params, "data"))
 
 
 def normalize_security(raw: dict[str, Any]) -> dict[str, Any]:
+    # Field names confirmed 2026-08-12 against a live Free-plan account.
+    # The wrapper key is "data" (not "equities"), and fields use short
+    # abbreviated names (CoName, not CompanyName) — nothing here matched
+    # the design blueprint's assumed V1-style CamelCase field names.
     code = pad_security_code(raw.get("Code") or raw.get("code") or "")
     return {
         "code": code,
         "ticker4": code[:4],
-        "name_ja": raw.get("CompanyName") or raw.get("company_name"),
-        "name_en": raw.get("CompanyNameEnglish") or raw.get("company_name_english"),
-        "market_code": raw.get("MarketCode") or raw.get("market_code"),
-        "sector17": raw.get("Sector17Code") or raw.get("sector17_code"),
-        "sector33": raw.get("Sector33Code") or raw.get("sector33_code"),
-        "scale_category": raw.get("ScaleCategory") or raw.get("scale_category"),
-        "listed_date": raw.get("ListedDate") or raw.get("listed_date"),
-        "delisted_date": raw.get("DelistedDate") or raw.get("delisted_date"),
+        "name_ja": raw.get("CoName") or raw.get("CompanyName"),
+        "name_en": raw.get("CoNameEn") or raw.get("CompanyNameEnglish"),
+        "market_code": raw.get("Mkt") or raw.get("MarketCode"),
+        "sector17": raw.get("S17") or raw.get("Sector17Code"),
+        "sector33": raw.get("S33") or raw.get("Sector33Code"),
+        "scale_category": raw.get("ScaleCat") or raw.get("ScaleCategory"),
+        # Not present in the observed /equities/master response at all
+        # (no listing/delisting date field of any name was in the payload).
+        # Left unmapped rather than guessed; revisit once confirmed.
+        "listed_date": None,
+        "delisted_date": None,
     }
 
 

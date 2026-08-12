@@ -12,7 +12,7 @@ from pipeline_py.ingest.jquants import (
 @respx.mock
 def test_fetch_equities_master_sends_api_key_header():
     route = respx.get(f"{BASE_URL}/equities/master").mock(
-        return_value=httpx.Response(200, json={"equities": [{"Code": "72030"}]})
+        return_value=httpx.Response(200, json={"data": [{"Code": "72030"}]})
     )
     client = JQuantsClient(api_key="test-key")
     result = client.fetch_equities_master()
@@ -27,8 +27,8 @@ def test_fetch_equities_master_sends_api_key_header():
 def test_fetch_equities_master_follows_pagination_key():
     respx.get(f"{BASE_URL}/equities/master").mock(
         side_effect=[
-            httpx.Response(200, json={"equities": [{"Code": "10000"}], "pagination_key": "page2"}),
-            httpx.Response(200, json={"equities": [{"Code": "20000"}]}),
+            httpx.Response(200, json={"data": [{"Code": "10000"}], "pagination_key": "page2"}),
+            httpx.Response(200, json={"data": [{"Code": "20000"}]}),
         ]
     )
     client = JQuantsClient(api_key="test-key")
@@ -41,7 +41,7 @@ def test_fetch_equities_master_follows_pagination_key():
 @respx.mock
 def test_fetch_daily_quotes_pads_4_digit_code_to_5():
     route = respx.get(f"{BASE_URL}/equities/bars/daily").mock(
-        return_value=httpx.Response(200, json={"daily_quotes": []})
+        return_value=httpx.Response(200, json={"data": []})
     )
     client = JQuantsClient(api_key="test-key")
     client.fetch_daily_quotes("7203", "2026-01-01", "2026-01-31")
@@ -56,7 +56,7 @@ def test_retries_on_429_then_succeeds():
     respx.get(f"{BASE_URL}/equities/master").mock(
         side_effect=[
             httpx.Response(429, json={"error": "rate limited"}),
-            httpx.Response(200, json={"equities": [{"Code": "72030"}]}),
+            httpx.Response(200, json={"data": [{"Code": "72030"}]}),
         ]
     )
     client = JQuantsClient(api_key="test-key")
@@ -75,13 +75,28 @@ def test_retries_on_429_then_succeeds():
     assert result == [{"Code": "72030"}]
 
 
-def test_normalize_security_maps_camelcase_fields_and_pads_code():
-    raw = {"Code": "7203", "CompanyName": "トヨタ自動車", "MarketCode": "0111"}
+def test_normalize_security_maps_live_confirmed_fields_and_pads_code():
+    # Field names confirmed 2026-08-12 against a live Free-plan account —
+    # short abbreviated names (CoName/Mkt/S17/S33/ScaleCat), not the
+    # CompanyName/MarketCode-style names the design blueprint assumed.
+    raw = {
+        "Code": "7203",
+        "CoName": "トヨタ自動車",
+        "CoNameEn": "TOYOTA MOTOR CORPORATION",
+        "Mkt": "0111",
+        "S17": "1",
+        "S33": "0050",
+        "ScaleCat": "TOPIX Small 1",
+    }
     row = normalize_security(raw)
     assert row["code"] == "72030"
     assert row["ticker4"] == "7203"
     assert row["name_ja"] == "トヨタ自動車"
+    assert row["name_en"] == "TOYOTA MOTOR CORPORATION"
     assert row["market_code"] == "0111"
+    assert row["sector17"] == "1"
+    assert row["sector33"] == "0050"
+    assert row["scale_category"] == "TOPIX Small 1"
 
 
 def test_normalize_daily_quote_maps_fields_and_stamps_known_from():

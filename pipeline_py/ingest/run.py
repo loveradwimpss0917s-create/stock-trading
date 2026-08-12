@@ -25,19 +25,13 @@ BACKFILL_YEARS = 2
 
 def run_ingest(mode: str, limit: int | None) -> None:
     with JQuantsClient.from_env() as jq, SupabaseUpsertClient() as db:
-        raw_master = jq._get("/equities/master", {})
-        print(f"[ingest] /equities/master raw top-level keys: {list(raw_master.keys())}", flush=True)
-
-        securities = raw_master.get("equities", [])
+        securities = jq.fetch_equities_master()
         if not securities:
-            # Our assumed response shape (items under an "equities" key) didn't
-            # match — dump enough of the raw payload to fix the parsing, and
-            # fail loudly instead of silently completing with 0 rows.
-            print(f"[ingest] raw response (truncated): {json.dumps(raw_master)[:3000]}", flush=True)
+            raw = jq._get("/equities/master", {})
+            print(f"[ingest] raw /equities/master response (truncated): {json.dumps(raw)[:3000]}", flush=True)
             raise RuntimeError(
-                "No securities parsed from /equities/master — response shape did not "
-                "match the assumed 'equities' key. See raw payload above and fix "
-                "jquants.py's parsing accordingly."
+                "No securities parsed from /equities/master. See raw payload above "
+                "and check jquants.py's parsing against it."
             )
         print(f"[ingest] fetched {len(securities)} securities from /equities/master", flush=True)
 
@@ -55,9 +49,21 @@ def run_ingest(mode: str, limit: int | None) -> None:
         date_to = date.today().isoformat()
 
         total_quotes = 0
-        for sec in securities:
+        for i, sec in enumerate(securities):
             code = sec.get("Code") or sec.get("code")
             quotes = jq.fetch_daily_quotes(code, date_from, date_to)
+
+            if i == 0 and quotes:
+                print(f"[ingest] sample raw daily_quotes[0] for {code}: {json.dumps(quotes[0])}", flush=True)
+                normalized_sample = normalize_daily_quote(quotes[0])
+                if normalized_sample["close"] is None:
+                    raise RuntimeError(
+                        "normalize_daily_quote produced a null close price from a "
+                        "non-empty response — field names in jquants.py's "
+                        "normalize_daily_quote likely don't match the sample logged "
+                        "above. Fix before this silently writes all-NULL rows."
+                    )
+
             db.upsert(
                 "daily_quotes",
                 [normalize_daily_quote(q) for q in quotes],
@@ -65,7 +71,10 @@ def run_ingest(mode: str, limit: int | None) -> None:
             )
             total_quotes += len(quotes)
             print(f"[ingest] {code}: upserted {len(quotes)} daily_quotes rows", flush=True)
-            jq.fetch_fins_summary(code)  # exercised, not yet persisted — see module docstring
+
+            fins = jq.fetch_fins_summary(code)
+            if i == 0 and fins:
+                print(f"[ingest] sample raw fins_summary[0] for {code}: {json.dumps(fins[0])}", flush=True)
         print(f"[ingest] done: {len(securities)} securities, {total_quotes} daily_quotes rows total", flush=True)
 
 
