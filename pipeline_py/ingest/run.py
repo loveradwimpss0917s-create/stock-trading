@@ -13,6 +13,7 @@ mapping + upsert lands once a real key allows inspecting the response shape.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import date, timedelta
 
@@ -24,11 +25,28 @@ BACKFILL_YEARS = 2
 
 def run_ingest(mode: str, limit: int | None) -> None:
     with JQuantsClient.from_env() as jq, SupabaseUpsertClient() as db:
-        securities = jq.fetch_equities_master()
+        raw_master = jq._get("/equities/master", {})
+        print(f"[ingest] /equities/master raw top-level keys: {list(raw_master.keys())}", flush=True)
+
+        securities = raw_master.get("equities", [])
+        if not securities:
+            # Our assumed response shape (items under an "equities" key) didn't
+            # match — dump enough of the raw payload to fix the parsing, and
+            # fail loudly instead of silently completing with 0 rows.
+            print(f"[ingest] raw response (truncated): {json.dumps(raw_master)[:3000]}", flush=True)
+            raise RuntimeError(
+                "No securities parsed from /equities/master — response shape did not "
+                "match the assumed 'equities' key. See raw payload above and fix "
+                "jquants.py's parsing accordingly."
+            )
+        print(f"[ingest] fetched {len(securities)} securities from /equities/master", flush=True)
+
         if limit:
             securities = securities[:limit]
+        print(f"[ingest] processing {len(securities)} securities (limit={limit})", flush=True)
 
         db.upsert("securities", [normalize_security(s) for s in securities], on_conflict="code")
+        print(f"[ingest] upserted {len(securities)} rows into securities", flush=True)
 
         if mode == "backfill":
             date_from = (date.today() - timedelta(days=365 * BACKFILL_YEARS)).isoformat()
@@ -36,6 +54,7 @@ def run_ingest(mode: str, limit: int | None) -> None:
             date_from = (date.today() - timedelta(days=7)).isoformat()
         date_to = date.today().isoformat()
 
+        total_quotes = 0
         for sec in securities:
             code = sec.get("Code") or sec.get("code")
             quotes = jq.fetch_daily_quotes(code, date_from, date_to)
@@ -44,7 +63,10 @@ def run_ingest(mode: str, limit: int | None) -> None:
                 [normalize_daily_quote(q) for q in quotes],
                 on_conflict="code,date",
             )
+            total_quotes += len(quotes)
+            print(f"[ingest] {code}: upserted {len(quotes)} daily_quotes rows", flush=True)
             jq.fetch_fins_summary(code)  # exercised, not yet persisted — see module docstring
+        print(f"[ingest] done: {len(securities)} securities, {total_quotes} daily_quotes rows total", flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:
