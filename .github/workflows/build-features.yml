@@ -1,0 +1,23 @@
+name: build-features
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Cap codes processed (blank = all with bars)"
+        required: false
+jobs:
+  features:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r pipeline_py/requirements.txt
+      - name: Build feature store
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >
+          python -m pipeline_py.features.build_features
+          ${{ github.event.inputs.limit && format('--limit {0}', github.event.inputs.limit) || '' }}
