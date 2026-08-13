@@ -41,23 +41,15 @@ app.get('/api/health', (c) =>
   c.json({ status: 'ok', service: 'kabu-quant-api', time: new Date().toISOString() })
 );
 
-/** Securities that actually have price data ingested, with their coverage. */
+/** Securities that actually have price data ingested. */
 app.get('/api/stocks', async (c) => {
   const search = c.req.query('q');
 
-  // daily_quotes only holds the codes backfilled so far, so drive the list
-  // from it rather than from all 4,446 master rows — otherwise the UI is
-  // mostly entries with nothing to show.
-  const quotes = await selectFrom<{ code: string }>(c.env, 'daily_quotes', {
-    select: 'code',
-    limit: '10000',
-  });
-  const codes = [...new Set(quotes.map((q) => q.code))];
-  if (codes.length === 0) return c.json({ stocks: [] });
-
-  const securities = await selectFrom<Security>(c.env, 'securities', {
+  // securities_with_data (migration 0007) does the "has bars?" join in the
+  // DB. Deriving it here from daily_quotes rows instead would silently
+  // truncate at PostgREST's max_rows.
+  const securities = await selectFrom<Security>(c.env, 'securities_with_data', {
     select: 'code,ticker4,name_ja,name_en,market_code,sector17,sector33,scale_category',
-    code: `in.(${codes.join(',')})`,
     order: 'code.asc',
   });
 
@@ -103,24 +95,31 @@ app.get('/api/stocks/:code', async (c) => {
   });
 });
 
-/** Ingestion coverage, for the dashboard's status panel. */
+/** Ingestion coverage, for the dashboard's status panel.
+ *
+ * Aggregated by the ingest_coverage view (migration 0007) rather than by
+ * counting fetched rows: PostgREST caps responses at max_rows (1000), so
+ * counting client-side reported exactly 1000/1000 and a truncated date
+ * range once the table grew past that.
+ */
 app.get('/api/sync/status', async (c) => {
-  const [securities, quotes] = await Promise.all([
-    selectFrom<{ code: string }>(c.env, 'securities', { select: 'code', limit: '10000' }),
-    selectFrom<{ code: string; date: string }>(c.env, 'daily_quotes', {
-      select: 'code,date',
-      limit: '100000',
-    }),
-  ]);
+  const rows = await selectFrom<{
+    securities_count: number;
+    daily_quotes_count: number;
+    covered_codes: number;
+    earliest_date: string | null;
+    latest_date: string | null;
+  }>(c.env, 'ingest_coverage', { select: '*' });
 
-  const dates = quotes.map((q) => q.date).sort();
-  return c.json({
-    securities_count: securities.length,
-    daily_quotes_count: quotes.length,
-    covered_codes: new Set(quotes.map((q) => q.code)).size,
-    earliest_date: dates[0] ?? null,
-    latest_date: dates[dates.length - 1] ?? null,
-  });
+  return c.json(
+    rows[0] ?? {
+      securities_count: 0,
+      daily_quotes_count: 0,
+      covered_codes: 0,
+      earliest_date: null,
+      latest_date: null,
+    }
+  );
 });
 
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));
