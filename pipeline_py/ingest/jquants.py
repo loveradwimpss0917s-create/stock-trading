@@ -60,6 +60,10 @@ class JQuantsClient:
         self.api_key = api_key
         self.client = client or httpx.Client(base_url=base_url, timeout=30.0)
         self._limiter = TokenBucketRateLimiter(rate_limit_per_min, 60.0)
+        # Learned from the first out-of-range 400 and reused, so a multi-
+        # thousand-code backfill pays that rejected request once instead of
+        # once per code — at 4 req/min it's a third of the total runtime.
+        self._plan_coverage: Optional[tuple[str, str]] = None
 
     @classmethod
     def from_env(cls) -> "JQuantsClient":
@@ -108,8 +112,16 @@ class JQuantsClient:
     def fetch_equities_master(self) -> list[dict[str, Any]]:
         return list(self._get_paginated("/equities/master", {}, "data"))
 
+    def _clamp_to_plan(self, date_from: str, date_to: str) -> tuple[str, str]:
+        if self._plan_coverage is None:
+            return date_from, date_to
+        allowed_from, allowed_to = self._plan_coverage
+        return max(date_from, allowed_from), min(date_to, allowed_to)
+
     def fetch_daily_quotes(self, code: str, date_from: str, date_to: str) -> list[dict[str, Any]]:
-        params = {"code": pad_security_code(code), "from": date_from, "to": date_to}
+        padded = pad_security_code(code)
+        req_from, req_to = self._clamp_to_plan(date_from, date_to)
+        params = {"code": padded, "from": req_from, "to": req_to}
         try:
             return list(self._get_paginated("/equities/bars/daily", params, "data"))
         except RetryExhausted as exc:
@@ -120,14 +132,14 @@ class JQuantsClient:
             if not match:
                 raise
             allowed_from, allowed_to = match.groups()
-            clamped_from = max(date_from, allowed_from)
-            clamped_to = min(date_to, allowed_to)
+            self._plan_coverage = (allowed_from, allowed_to)
+            clamped_from, clamped_to = self._clamp_to_plan(date_from, date_to)
             print(
-                f"[jquants] requested range {date_from}~{date_to} exceeds plan "
-                f"coverage; retrying clamped to {clamped_from}~{clamped_to}",
+                f"[jquants] plan covers {allowed_from}~{allowed_to}; clamping "
+                f"requests to {clamped_from}~{clamped_to} for the rest of this run",
                 flush=True,
             )
-            clamped_params = {"code": pad_security_code(code), "from": clamped_from, "to": clamped_to}
+            clamped_params = {"code": padded, "from": clamped_from, "to": clamped_to}
             return list(self._get_paginated("/equities/bars/daily", clamped_params, "data"))
 
     def fetch_fins_summary(self, code: str) -> list[dict[str, Any]]:

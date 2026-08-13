@@ -88,6 +88,40 @@ def test_fetch_daily_quotes_clamps_to_plan_coverage_on_400():
 
 
 @respx.mock
+def test_plan_coverage_is_learned_once_and_reused_for_later_codes():
+    # The rejected out-of-range request should be paid once per run, not once
+    # per code — at 4 req/min that difference is hours across a full backfill.
+    route = respx.get(f"{BASE_URL}/equities/bars/daily").mock(
+        side_effect=[
+            httpx.Response(
+                400,
+                json={
+                    "message": "Your subscription covers the following dates: "
+                    "2024-05-20 ~ 2026-05-20."
+                },
+            ),
+            httpx.Response(200, json={"data": [{"Code": "10000"}]}),  # clamped retry
+            httpx.Response(200, json={"data": [{"Code": "20000"}]}),  # second code
+        ]
+    )
+    client = JQuantsClient(api_key="test-key")
+    import pipeline_py.ingest.common as common_mod
+
+    original_sleep = common_mod.time.sleep
+    common_mod.time.sleep = lambda seconds: None
+    try:
+        client.fetch_daily_quotes("10000", "2024-08-12", "2026-08-12")
+        client.fetch_daily_quotes("20000", "2024-08-12", "2026-08-12")
+    finally:
+        common_mod.time.sleep = original_sleep
+        client.close()
+
+    assert route.call_count == 3  # not 4 — the second code skips the 400
+    second_code_params = dict(route.calls[2].request.url.params)
+    assert second_code_params["to"] == "2026-05-20"  # already clamped on the first try
+
+
+@respx.mock
 def test_retries_on_429_then_succeeds():
     respx.get(f"{BASE_URL}/equities/master").mock(
         side_effect=[

@@ -5,16 +5,27 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "backfill (~2y) or incremental (7d)"
+        description: "backfill (full plan window) or incremental (7d)"
         type: choice
         options: [incremental, backfill]
         default: incremental
+      universe:
+        description: "Codes to cover (core30 ≈ 15min, topix500 spans several runs)"
+        type: choice
+        options: [core30, large100, topix500, operating, all]
+        default: core30
+      max_minutes:
+        description: "Stop starting new codes after this many minutes"
+        default: "300"
       limit:
-        description: "Limit securities count (leave empty for all)"
+        description: "Extra cap on codes this run (blank = no cap)"
         required: false
 jobs:
   ingest:
     runs-on: ubuntu-latest
+    # Above the 300-minute default budget so the job isn't killed mid-code;
+    # GitHub's own ceiling is 360.
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,4 +39,6 @@ jobs:
         run: >
           python -m pipeline_py.ingest.run
           --mode ${{ github.event.inputs.mode || 'incremental' }}
+          --universe ${{ github.event.inputs.universe || 'core30' }}
+          --max-minutes ${{ github.event.inputs.max_minutes || '300' }}
           ${{ github.event.inputs.limit && format('--limit {0}', github.event.inputs.limit) || '' }}
