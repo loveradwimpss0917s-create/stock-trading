@@ -124,6 +124,14 @@ def build(codes: list[str] | None = None, limit: int | None = None) -> int:
                     "order": "date.asc",
                 },
             )
+            # J-Quants returns rows with null OHLC for sessions a code did not
+            # trade (pre-listing dates, illiquid ETFs). Indicators are computed
+            # over the surviving observations, which means a rolling window
+            # spans more calendar days than its period where gaps exist. That's
+            # the usual convention, and no code in the research universe is
+            # affected — as of the Core30 backfill, only 131A0 (all null,
+            # pre-listing) and 13190 (an illiquid ETF) have any, and both are
+            # excluded by universe.is_operating_company.
             bars = [b for b in bars if b.get("close") is not None]
             rows = build_rows(code, bars)
             if not rows:
