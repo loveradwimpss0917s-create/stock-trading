@@ -15,6 +15,8 @@ interface Security {
   sector17: string | null;
   sector33: string | null;
   scale_category: string | null;
+  /** Whether daily bars have been backfilled for this code yet. */
+  has_data?: boolean;
 }
 
 interface DailyQuote {
@@ -41,28 +43,48 @@ app.get('/api/health', (c) =>
   c.json({ status: 'ok', service: 'kabu-quant-api', time: new Date().toISOString() })
 );
 
-/** Securities that actually have price data ingested. */
-app.get('/api/stocks', async (c) => {
-  const search = c.req.query('q');
+const SECURITY_COLUMNS =
+  'code,ticker4,name_ja,name_en,market_code,sector17,sector33,scale_category';
 
-  // securities_with_data (migration 0007) does the "has bars?" join in the
-  // DB. Deriving it here from daily_quotes rows instead would silently
-  // truncate at PostgREST's max_rows.
-  const securities = await selectFrom<Security>(c.env, 'securities_with_data', {
-    select: 'code,ticker4,name_ja,name_en,market_code,sector17,sector33,scale_category',
-    order: 'code.asc',
+/** PostgREST treats , . : ( ) as syntax inside an or=(...) filter, so a query
+ * containing them would corrupt the expression. Strip them rather than trying
+ * to escape — none of them are meaningful in a ticker or a company name. */
+function sanitizeSearch(raw: string): string {
+  return raw.replace(/[,.:()*\\]/g, '').trim();
+}
+
+/**
+ * Without `q`: the securities that actually have bars (the browsable list).
+ * With `q`: searches all 4,446 master rows, so a code that hasn't been
+ * backfilled yet is still findable — each result carries `has_data` so the
+ * UI can say so rather than showing an empty chart.
+ */
+app.get('/api/stocks', async (c) => {
+  const raw = c.req.query('q')?.trim();
+
+  if (!raw) {
+    const securities = await selectFrom<Security>(c.env, 'securities_with_data', {
+      select: SECURITY_COLUMNS,
+      order: 'code.asc',
+    });
+    return c.json({ stocks: securities.map((s) => ({ ...s, has_data: true })) });
+  }
+
+  const q = sanitizeSearch(raw);
+  if (!q) return c.json({ stocks: [] });
+
+  // Matched in Postgres, not by filtering a fetched page — the master table
+  // is far past PostgREST's max_rows, so client-side filtering would only
+  // ever search the first 1000 codes.
+  const stocks = await selectFrom<Security>(c.env, 'securities_searchable', {
+    select: `${SECURITY_COLUMNS},has_data`,
+    or: `(code.ilike.*${q}*,name_ja.ilike.*${q}*,name_en.ilike.*${q}*)`,
+    // Codes with data first, then by code, so the useful hits lead.
+    order: 'has_data.desc,code.asc',
+    limit: '100',
   });
 
-  const filtered = search
-    ? securities.filter(
-        (s) =>
-          s.code.includes(search) ||
-          (s.name_ja ?? '').includes(search) ||
-          (s.name_en ?? '').toLowerCase().includes(search.toLowerCase())
-      )
-    : securities;
-
-  return c.json({ stocks: filtered });
+  return c.json({ stocks });
 });
 
 /** One security's profile plus its recent daily bars. */
@@ -72,7 +94,7 @@ app.get('/api/stocks/:code', async (c) => {
 
   const [securities, quotes] = await Promise.all([
     selectFrom<Security>(c.env, 'securities', {
-      select: 'code,ticker4,name_ja,name_en,market_code,sector17,sector33,scale_category',
+      select: SECURITY_COLUMNS,
       code: `eq.${code}`,
       limit: '1',
     }),

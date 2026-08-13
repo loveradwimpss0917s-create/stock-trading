@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   fetchStock,
   fetchStocks,
@@ -19,23 +19,43 @@ function pctChange(quotes: DailyQuote[]): number | null {
 
 export default function App() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [query, setQuery] = useState('');
   const [stocks, setStocks] = useState<Security[]>([]);
+  const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ security: Security; quotes: DailyQuote[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([fetchSyncStatus(), fetchStocks()])
-      .then(([s, list]) => {
-        setStatus(s);
-        setStocks(list.stocks);
-        if (list.stocks.length > 0) setSelected(list.stocks[0]!.code);
-      })
-      .catch((e) => setError(String(e)));
+    fetchSyncStatus().then(setStatus).catch((e) => setError(String(e)));
   }, []);
 
+  // Debounced so typing a code doesn't fire a request per keystroke.
+  const requestId = useRef(0);
   useEffect(() => {
-    if (!selected) return;
+    const id = ++requestId.current;
+    setSearching(true);
+    const timer = setTimeout(() => {
+      fetchStocks(query.trim() || undefined)
+        .then((res) => {
+          // Ignore a slow response that a newer query has already superseded.
+          if (id !== requestId.current) return;
+          setStocks(res.stocks);
+          setSelected((prev) =>
+            prev && res.stocks.some((s) => s.code === prev) ? prev : (res.stocks[0]?.code ?? null)
+          );
+        })
+        .catch((e) => id === requestId.current && setError(String(e)))
+        .finally(() => id === requestId.current && setSearching(false));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    if (!selected) {
+      setDetail(null);
+      return;
+    }
     setDetail(null);
     fetchStock(selected)
       .then(setDetail)
@@ -82,22 +102,44 @@ export default function App() {
       )}
 
       <div className="layout">
-        <nav className="list" aria-label="銘柄一覧">
-          {stocks.length === 0 && !error && <p className="muted">読み込み中…</p>}
-          {stocks.map((s) => (
-            <button
-              key={s.code}
-              className={`list-item${s.code === selected ? ' is-selected' : ''}`}
-              onClick={() => setSelected(s.code)}
-            >
-              <span className="tabular code">{s.ticker4}</span>
-              <span className="name">{s.name_ja ?? s.name_en ?? s.code}</span>
-            </button>
-          ))}
+        <nav className="list-panel" aria-label="銘柄一覧">
+          <input
+            type="search"
+            className="search"
+            placeholder="銘柄コード・社名で検索（例: 7203, トヨタ）"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="銘柄検索"
+          />
+          <p className="list-hint">
+            {query.trim()
+              ? searching
+                ? '検索中…'
+                : `${stocks.length}件${stocks.length >= 100 ? '以上' : ''}（全${status?.securities_count.toLocaleString() ?? '—'}銘柄から検索）`
+              : '日足取得済みの銘柄'}
+          </p>
+
+          <div className="list">
+            {stocks.length === 0 && !searching && (
+              <p className="muted pad">該当する銘柄がありません。</p>
+            )}
+            {stocks.map((s) => (
+              <button
+                key={s.code}
+                className={`list-item${s.code === selected ? ' is-selected' : ''}`}
+                onClick={() => setSelected(s.code)}
+              >
+                <span className="tabular code">{s.ticker4}</span>
+                <span className="name">{s.name_ja ?? s.name_en ?? s.code}</span>
+                {s.has_data === false && <span className="badge">未取得</span>}
+              </button>
+            ))}
+          </div>
         </nav>
 
         <section className="detail">
           {!detail && selected && <p className="muted">読み込み中…</p>}
+          {!selected && <p className="muted">銘柄を選択してください。</p>}
           {detail && (
             <>
               <div className="detail-head">
@@ -123,36 +165,45 @@ export default function App() {
                 )}
               </div>
 
-              <PriceChart quotes={detail.quotes} />
+              {detail.quotes.length === 0 ? (
+                <p className="notice">
+                  この銘柄の日足はまだ取得していません。現在は10銘柄のみバックフィル済みです
+                  （全銘柄の取得にはJ-Quants Freeのレート制限下で長時間を要します）。
+                </p>
+              ) : (
+                <>
+                  <PriceChart quotes={detail.quotes} />
 
-              <table className="quotes">
-                <thead>
-                  <tr>
-                    <th>日付</th>
-                    <th className="num">始値</th>
-                    <th className="num">高値</th>
-                    <th className="num">安値</th>
-                    <th className="num">終値</th>
-                    <th className="num">出来高</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.quotes
-                    .slice()
-                    .reverse()
-                    .slice(0, 15)
-                    .map((q) => (
-                      <tr key={q.date}>
-                        <td className="tabular">{q.date}</td>
-                        <td className="num tabular">{Number(q.open).toLocaleString('ja-JP')}</td>
-                        <td className="num tabular">{Number(q.high).toLocaleString('ja-JP')}</td>
-                        <td className="num tabular">{Number(q.low).toLocaleString('ja-JP')}</td>
-                        <td className="num tabular">{Number(q.close).toLocaleString('ja-JP')}</td>
-                        <td className="num tabular">{q.volume?.toLocaleString('ja-JP') ?? '—'}</td>
+                  <table className="quotes">
+                    <thead>
+                      <tr>
+                        <th>日付</th>
+                        <th className="num">始値</th>
+                        <th className="num">高値</th>
+                        <th className="num">安値</th>
+                        <th className="num">終値</th>
+                        <th className="num">出来高</th>
                       </tr>
-                    ))}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {detail.quotes
+                        .slice()
+                        .reverse()
+                        .slice(0, 15)
+                        .map((q) => (
+                          <tr key={q.date}>
+                            <td className="tabular">{q.date}</td>
+                            <td className="num tabular">{Number(q.open).toLocaleString('ja-JP')}</td>
+                            <td className="num tabular">{Number(q.high).toLocaleString('ja-JP')}</td>
+                            <td className="num tabular">{Number(q.low).toLocaleString('ja-JP')}</td>
+                            <td className="num tabular">{Number(q.close).toLocaleString('ja-JP')}</td>
+                            <td className="num tabular">{q.volume?.toLocaleString('ja-JP') ?? '—'}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
             </>
           )}
         </section>

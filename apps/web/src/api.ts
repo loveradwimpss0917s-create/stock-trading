@@ -7,6 +7,8 @@ export interface Security {
   sector17: string | null;
   sector33: string | null;
   scale_category: string | null;
+  /** False when the code exists in the master list but has no bars yet. */
+  has_data?: boolean;
 }
 
 export interface DailyQuote {
@@ -35,6 +37,7 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const fetchSyncStatus = () => get<SyncStatus>('/api/sync/status');
-export const fetchStocks = () => get<{ stocks: Security[] }>('/api/stocks');
+export const fetchStocks = (q?: string) =>
+  get<{ stocks: Security[] }>(q ? `/api/stocks?q=${encodeURIComponent(q)}` : '/api/stocks');
 export const fetchStock = (code: string) =>
   get<{ security: Security; quotes: DailyQuote[] }>(`/api/stocks/${code}`);
