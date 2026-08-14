@@ -1,0 +1,28 @@
+name: validate-stats
+on:
+  workflow_dispatch:
+    inputs:
+      blocks:
+        description: "CSCV blocks (even; 16 -> C(16,8)=12,870 splits)"
+        default: "16"
+      persist:
+        description: "Write verdicts to Supabase"
+        type: boolean
+        default: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r pipeline_py/requirements.txt
+      - name: DSR / PBO / purged K-Fold
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >
+          python -m pipeline_py.stats.run
+          --blocks ${{ github.event.inputs.blocks || '16' }}
+          ${{ github.event.inputs.persist != 'false' && '--persist' || '' }}
