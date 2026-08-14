@@ -172,3 +172,101 @@ class TestDegenerateInput:
         out = score_theme(rows, BREAKOUT, "swing", top_n=10)
         assert len(out) == 4
         assert all(abs(c.score) < 1e-9 for c in out)
+
+
+class TestSnapshotExcludesFunds:
+    """ETFs reach the feature store (they have bars like anything else), and
+    nothing downstream would keep them out of a factor theme: a TOPIX ETF
+    clears the turnover filter by a wide margin and moves like a low-vol
+    stock. The exclusion has to happen when the snapshot is built."""
+
+    @staticmethod
+    def _snapshot(sec_rows):
+        from unittest.mock import MagicMock
+
+        from pipeline_py.screening.run import load_snapshot
+
+        db = MagicMock()
+        codes = [s["code"] for s in sec_rows]
+        db.select_all.side_effect = lambda table, _q: {
+            "features": [
+                dict(row(), code=c, atr_14=30.0) | {"ma_25": 990.0, "ma_75": 950.0}
+                for c in codes
+            ],
+            "daily_quotes": [
+                {"code": c, "close": 1000.0, "turnover_value": 50_000_000_000}
+                for c in codes
+            ],
+            "securities_with_data": sec_rows,
+        }[table]
+        return load_snapshot(db, "2026-05-22")
+
+    def test_etf_is_dropped_from_the_snapshot(self):
+        snap = self._snapshot(
+            [
+                {
+                    "code": "13060",
+                    "name_ja": "ＴＯＰＩＸ連動型上場投信",
+                    "sector33": "9999",
+                    "scale_category": "-",
+                },
+                {
+                    "code": "72030",
+                    "name_ja": "トヨタ自動車",
+                    "sector33": "3700",
+                    "scale_category": "TOPIX Core30",
+                },
+            ]
+        )
+        assert set(snap) == {"72030"}
+
+    def test_an_unclassified_listing_is_dropped_even_with_a_real_sector(self):
+        # Sector alone is not enough: a fund can carry a plausible-looking
+        # sector code, so the scale category has to agree it is a company.
+        snap = self._snapshot(
+            [
+                {
+                    "code": "99990",
+                    "name_ja": "何らかのファンド",
+                    "sector33": "3650",
+                    "scale_category": "-",
+                }
+            ]
+        )
+        assert snap == {}
+
+
+class TestSectorThemeCoverage:
+    """0014 exists because the 0012 themes were derived from the sector33
+    codes present when only 41 codes had bars. This pins the union so a
+    future universe change surfaces as a failing test rather than as
+    silently unreachable stocks."""
+
+    SECTOR33_IN_TOPIX500 = {
+        "0050", "1050", "2050", "3050", "3100", "3150", "3200", "3250",
+        "3300", "3350", "3400", "3450", "3500", "3550", "3600", "3650",
+        "3700", "3750", "3800", "4050", "5050", "5100", "5150", "5200",
+        "5250", "6050", "6100", "7050", "7100", "7150", "7200", "8050",
+        "9050",
+    }
+
+    @staticmethod
+    def _seeded_sectors():
+        import re
+        from pathlib import Path
+
+        covered: set[str] = set()
+        migrations = Path(__file__).resolve().parents[2] / "supabase" / "migrations"
+        for path in sorted(migrations.glob("00*_*themes*.sql")) + sorted(
+            migrations.glob("00*_sector_theme*.sql")
+        ):
+            for blob in re.findall(r'"sector33":\s*\[([^\]]*)\]', path.read_text()):
+                covered |= set(re.findall(r'"(\d+)"', blob))
+        return covered
+
+    def test_every_operating_sector_belongs_to_some_theme(self):
+        missing = self.SECTOR33_IN_TOPIX500 - self._seeded_sectors()
+        assert not missing, f"sector33 codes with no theme: {sorted(missing)}"
+
+    def test_funds_are_not_given_a_theme(self):
+        assert "9999" not in self._seeded_sectors()

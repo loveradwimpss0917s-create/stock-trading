@@ -9,6 +9,7 @@ import json
 import sys
 
 from ..ingest.supabase_client import SupabaseUpsertClient
+from ..ingest.universe import is_operating_company
 from .scoring import score_theme
 
 FEATURE_COLUMNS = [
@@ -42,11 +43,16 @@ def load_snapshot(db: SupabaseUpsertClient, as_of: str) -> dict[str, dict]:
         {"select": "code,close,turnover_value", "date": f"eq.{as_of}"},
     )
     sec_rows = db.select_all(
-        "securities_with_data", {"select": "code,name_ja,sector33"}
+        "securities_with_data", {"select": "code,name_ja,sector33,scale_category"}
     )
 
     quotes = {r["code"]: r for r in quote_rows}
-    secs = {r["code"]: r for r in sec_rows}
+    # Funds are dropped with the same predicate the ingest universe uses, so
+    # "a company" has one definition. A TOPIX ETF clears the turnover filter
+    # by a wide margin and moves like a low-volatility stock, so nothing
+    # downstream would stop it ranking in a factor theme — it just did not
+    # happen to this session.
+    secs = {r["code"]: r for r in sec_rows if is_operating_company(r)}
 
     snapshot: dict[str, dict] = {}
     for f in feature_rows:
