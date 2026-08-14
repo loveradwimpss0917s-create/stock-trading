@@ -1,0 +1,32 @@
+name: backtest
+on:
+  workflow_dispatch:
+    inputs:
+      rebalance_every:
+        description: "Rebalance interval in sessions"
+        default: "5"
+      n_side:
+        description: "Names per leg (long and short)"
+        default: "5"
+      persist:
+        description: "Write results to Supabase"
+        type: boolean
+        default: true
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r pipeline_py/requirements.txt
+      - name: Run backtests
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >
+          python -m pipeline_py.backtest.run
+          --rebalance-every ${{ github.event.inputs.rebalance_every || '5' }}
+          --n-side ${{ github.event.inputs.n_side || '5' }}
+          ${{ github.event.inputs.persist != 'false' && '--persist' || '' }}

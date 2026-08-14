@@ -61,6 +61,26 @@ class SupabaseUpsertClient:
         resp.raise_for_status()
         return resp.json()
 
+    def insert_returning(self, table: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Plain insert that returns the created rows — needed when a table's
+        primary key is an identity column and a child row needs the new id."""
+        if not rows:
+            return []
+        resp = self.client.post(
+            f"{self.url}/rest/v1/{table}",
+            json=rows,
+            headers={
+                "apikey": self.service_role_key,
+                "Authorization": f"Bearer {self.service_role_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation",
+            },
+        )
+        if resp.status_code >= 400:
+            print(f"[supabase] {resp.status_code} inserting into {table}: {resp.text[:500]}", flush=True)
+        resp.raise_for_status()
+        return resp.json()
+
     def upsert(self, table: str, rows: list[dict[str, Any]], on_conflict: str) -> None:
         if not rows:
             return
