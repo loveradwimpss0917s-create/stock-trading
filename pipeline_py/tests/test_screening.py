@@ -270,3 +270,34 @@ class TestSectorThemeCoverage:
 
     def test_funds_are_not_given_a_theme(self):
         assert "9999" not in self._seeded_sectors()
+
+
+class TestEveryComponentHasAUiLabel:
+    """The scorer names components in Python; the UI labels them in TypeScript.
+    Nothing links the two, so adding a component without a label silently
+    leaks an internal name like `ret_20d` into the 根拠 column. This reads
+    both sides and compares them."""
+
+    @staticmethod
+    def _ui_labels():
+        import re
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parents[2]
+            / "apps" / "web" / "src" / "CandidatesPanel.tsx"
+        ).read_text()
+        block = re.search(
+            r"COMPONENT_LABEL:\s*Record<[^>]*>\s*=\s*\{(.*?)\n\};", src, re.S
+        )
+        assert block, "COMPONENT_LABEL not found in CandidatesPanel.tsx"
+        return set(re.findall(r"^\s{2}(\w+):\s*\{", block.group(1), re.M))
+
+    def test_labels_cover_every_scored_component(self):
+        from pipeline_py.screening.scoring import _component_scores
+
+        produced = set(_component_scores(universe()))
+        assert not produced - self._ui_labels(), (
+            "components with no Japanese label in the UI: "
+            f"{sorted(produced - self._ui_labels())}"
+        )

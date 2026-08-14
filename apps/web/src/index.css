@@ -634,3 +634,10 @@ body {
 .link-btn:hover {
   text-decoration: underline;
 }
+
+.reason {
+  display: inline-block;
+  white-space: nowrap;
+  margin-right: 8px;
+  cursor: help;
+}

@@ -3,6 +3,27 @@ import { fetchCandidates, fetchThemes, type Candidate, type Theme } from './api'
 
 const HORIZON_LABEL: Record<string, string> = { day: 'デイ', swing: 'スイング' };
 
+/** The scorer's component keys are internal names (ret_20d, adx_14). Showing
+ * them raw asks the reader to learn the codebase's vocabulary, so each gets a
+ * Japanese label and a longer note used as a tooltip. A test in
+ * test_screening.py reads this map and fails if the scorer grows a component
+ * that has no label here. */
+const COMPONENT_LABEL: Record<string, { short: string; note: string }> = {
+  ret_1d: { short: '前日騰落', note: '前日の騰落率。上げた銘柄ほど上位' },
+  ret_5d: { short: '5日騰落', note: '直近5営業日の騰落率。上げた銘柄ほど上位' },
+  ret_20d: { short: '20日騰落', note: '直近20営業日（約1か月）の騰落率。上げた銘柄ほど上位' },
+  ret_1d_neg: { short: '前日の下げ', note: '前日の下落幅。下げた銘柄ほど上位（逆張り）' },
+  ret_5d_neg: { short: '5日の下げ', note: '直近5営業日の下落幅。下げた銘柄ほど上位（押し目）' },
+  dist_52w_high: { short: '52週高値接近', note: '52週高値までの距離。高値に近いほど上位' },
+  adx_14: { short: 'トレンドの強さ', note: 'ADX(14)。上下の方向は問わず、トレンドが明確なほど上位' },
+  rsi_oversold: { short: '売られすぎ', note: 'RSI(14)が50より低いほど上位' },
+  atr_pct: { short: '値幅率', note: 'ATR(14)÷株価。1日に動く幅が大きいほど上位' },
+  vol_20d: { short: 'ボラティリティ', note: '20日間の変動の大きさ。大きいほど上位' },
+  abs_ret_1d: { short: '前日の変動幅', note: '前日の値動きの大きさ。方向は問わない' },
+  above_ma25: { short: '25日線より上', note: '終値が25日移動平均を上回れば1、下回れば0' },
+  above_ma75: { short: '75日線より上', note: '終値が75日移動平均を上回れば1、下回れば0' },
+};
+
 function yen(v: number | null | undefined): string {
   return v == null ? '—' : Number(v).toLocaleString('ja-JP', { maximumFractionDigits: 1 });
 }
@@ -181,10 +202,12 @@ export function CandidatesPanel() {
               <tbody>
                 {(showAll ? list : list.slice(0, PREVIEW_ROWS)).map((c) => {
                   const qty = shares(capital, riskPct, c.entry_ref, c.stop_price);
+                  // Top two by absolute contribution, but the sign is kept: a
+                  // large negative contribution held the name back, and
+                  // labelling it the same as a positive one would misread.
                   const components = Object.entries(c.rationale?.components ?? {})
                     .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
-                    .slice(0, 2)
-                    .map(([k]) => k);
+                    .slice(0, 2);
                   return (
                     <tr key={c.code}>
                       <td className="tabular">{c.rank}</td>
@@ -199,7 +222,26 @@ export function CandidatesPanel() {
                       <td className="num tabular">
                         {qty ? yen(Math.round(qty * c.entry_ref)) : '—'}
                       </td>
-                      <td className="reasons">{components.join(' / ') || '—'}</td>
+                      <td className="reasons">
+                        {components.length === 0
+                          ? '—'
+                          : components.map(([k, v]) => {
+                              const label = COMPONENT_LABEL[k];
+                              return (
+                                <span
+                                  key={k}
+                                  className={`reason ${v >= 0 ? 'up' : 'down'}`}
+                                  title={
+                                    label
+                                      ? `${label.note}（寄与 ${v >= 0 ? '+' : ''}${v.toFixed(2)}）`
+                                      : k
+                                  }
+                                >
+                                  {v >= 0 ? '▲' : '▼'} {label?.short ?? k}
+                                </span>
+                              );
+                            })}
+                      </td>
                     </tr>
                   );
                 })}
@@ -214,6 +256,13 @@ export function CandidatesPanel() {
         </div>
       ))}
 
+      <p className="muted footnote">
+        <strong>根拠欄</strong>は、その銘柄の順位を最も動かした要因を上位2つ表示しています。
+        ▲は順位を押し上げた要因、▼は押し下げた要因です（項目名にカーソルを合わせると説明が出ます）。
+        各要因は<strong>その日の全銘柄の中での偏差</strong>（Zスコア）であって、生の数値ではありません。
+        「20日騰落が+15%」ではなく「20日騰落が平均より上位」という意味です。
+        円建てのATRとポイント建てのRSIを足し合わせられるようにするための処理です。
+      </p>
       <p className="muted footnote">
         損切り・目標はATR（平均的な値幅）の倍数です。株数は「損切りに当たったとき資金の
         {(riskPct * 100).toFixed(1)}%を失う」逆算で、単元株100株に丸めています。
