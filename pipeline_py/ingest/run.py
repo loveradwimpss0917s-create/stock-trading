@@ -6,9 +6,9 @@ the API and clamps to them).
 incremental: pulls the last 7 days — the daily Cron catch-up window.
 
 Backfilling the whole universe does not fit in one GitHub Actions run: at
-4 req/min with 2 calls per code, ~4,000 companies is over 30 hours against
-a 6-hour job limit. So a run takes a time budget, records per-code progress
-in ingest_checkpoint, and the next run resumes where this one stopped.
+4 req/min, ~4,000 companies is over 16 hours against a 6-hour job limit.
+So a run takes a time budget, records per-code progress in
+ingest_checkpoint, and the next run resumes where this one stopped.
 
 financials (`/fins/summary`) is fetched but not persisted: the V2 response's
 field names are unverified against the schema, and financials.known_from
@@ -120,7 +120,12 @@ def run_ingest(
                     [normalize_daily_quote(q) for q in quotes],
                     on_conflict="code,date",
                 )
-                jq.fetch_fins_summary(code)  # exercised, not persisted — see module docstring
+                # Exercised, not persisted (see module docstring). Only on the
+                # first code of a run: at 4 req/min a second call per code
+                # doubles the wall clock, and 500 identical smoke tests prove
+                # nothing the first one didn't.
+                if processed == 0:
+                    jq.fetch_fins_summary(code)
 
                 db.upsert(
                     "ingest_checkpoint",
