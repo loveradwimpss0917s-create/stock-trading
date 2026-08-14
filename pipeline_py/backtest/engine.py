@@ -96,31 +96,46 @@ def run_backtest(
     traded_notional = 0.0
 
     for i, date in enumerate(calendar):
-        # 1) Mark the book on today's close, using yesterday's close as the base.
         day_return = 0.0
-        if i > 0:
-            prev = calendar[i - 1]
-            for pos in positions.values():
-                bar_today = bars.get(pos.code, {}).get(date)
-                bar_prev = bars.get(pos.code, {}).get(prev)
-                if not bar_today or not bar_prev or not bar_prev.close:
-                    continue
-                px_ret = (bar_today.close - bar_prev.close) / bar_prev.close
-                signed = px_ret if pos.side == "long" else -px_ret
-                day_return += pos.weight * signed
-                pos.days_held += 1
-                if pos.side == "short":
-                    day_return -= costs.borrow_cost(pos.weight, 1, "short")
+        prev = calendar[i - 1] if i > 0 else None
 
-        # 2) Execute what was decided on the previous rebalance, at TODAY's open.
+        # 1) Execute first, at TODAY's open — a fill happens before the close
+        #    it will be marked against. Doing this after the mark would drop
+        #    the entry day's open->close move from the daily series while
+        #    still counting it in trade PnL, so the equity curve and the
+        #    trade list would measure different things (a positive Sharpe
+        #    alongside a profit factor below 1 is the tell).
         if pending and pending[0] == date:
             _, targets = pending
             pending = None
-            cost_drag, opened, closed, notional = _rebalance(
-                date, targets, positions, bars, features, costs, trades
+            cost_drag, notional, exit_pnl = _rebalance(
+                date, targets, positions, bars, features, costs, trades, prev
             )
-            day_return -= cost_drag
+            day_return += exit_pnl - cost_drag
             traded_notional += notional
+
+        # 2) Mark the book to today's close. A position opened today is marked
+        #    from its entry fill; one carried in is marked from yesterday's
+        #    close.
+        for pos in positions.values():
+            bar_today = bars.get(pos.code, {}).get(date)
+            if not bar_today:
+                continue
+            if pos.entry_date == date:
+                base = pos.entry_price
+            else:
+                bar_prev = bars.get(pos.code, {}).get(prev) if prev else None
+                if not bar_prev or not bar_prev.close:
+                    continue
+                base = bar_prev.close
+            if not base:
+                continue
+            px_ret = (bar_today.close - base) / base
+            signed = px_ret if pos.side == "long" else -px_ret
+            day_return += pos.weight * signed
+            pos.days_held += 1
+            if pos.side == "short":
+                day_return -= costs.borrow_cost(pos.weight, 1, "short")
 
         if i >= warmup:
             daily_returns.append(day_return)
@@ -135,9 +150,14 @@ def run_backtest(
             if fill_date:
                 pending = (fill_date, strategy.target_weights(date, asof_features))
 
-    # Close anything still open at the final close, so metrics see realized PnL.
+    # Close anything still open at the final close, so metrics see realized
+    # PnL. The book was already marked to that close, so only the exit
+    # slippage remains to be booked — otherwise the equity curve would omit a
+    # cost the trade list charges.
     if positions and calendar:
-        _close_all(calendar[-1], positions, bars, features, costs, trades)
+        residual = _close_all(calendar[-1], positions, bars, features, costs, trades)
+        if daily_returns:
+            daily_returns[-1] += residual
 
     years = max(len(daily_returns) / 252, 1e-9)
     turnover = traded_notional / years
@@ -168,10 +188,17 @@ def _rebalance(
     features: dict[str, dict[str, FeatureRow]],
     costs: CostModel,
     trades: list[Trade],
-) -> tuple[float, int, int, float]:
+    prev_date: Optional[str],
+) -> tuple[float, float, float]:
+    """Returns (cost_drag, traded_notional, exit_day_pnl).
+
+    exit_day_pnl is the last leg of a closing position's return — yesterday's
+    close to today's exit fill. The mark step can't produce it because the
+    position is gone by then.
+    """
     cost_drag = 0.0
     notional = 0.0
-    opened = closed = 0
+    exit_pnl = 0.0
 
     # Exit anything no longer targeted (or whose side flipped).
     for code in list(positions):
@@ -183,6 +210,16 @@ def _rebalance(
             if not bar:
                 continue  # no fill available; carry the position
             fill = costs.exit_fill_price(bar.open, _atr_of(features, code, date), pos.side)
+
+            # Final marking leg: from whatever the position was last marked at
+            # (yesterday's close, or its own entry fill if it opened today) to
+            # the exit fill.
+            bar_prev = bars.get(code, {}).get(prev_date) if prev_date else None
+            base = pos.entry_price if pos.entry_date == date else (bar_prev.close if bar_prev else None)
+            if base:
+                leg = (fill - base) / base
+                exit_pnl += pos.weight * (leg if pos.side == "long" else -leg)
+
             gross = (
                 (fill - pos.entry_price) / pos.entry_price
                 if pos.side == "long"
@@ -208,7 +245,6 @@ def _rebalance(
                 )
             )
             del positions[code]
-            closed += 1
 
     # Enter new targets.
     for code, target in targets.items():
@@ -226,9 +262,8 @@ def _rebalance(
         positions[code] = Position(
             code=code, side=side, weight=weight, entry_date=date, entry_price=fill
         )
-        opened += 1
 
-    return cost_drag, opened, closed, notional
+    return cost_drag, notional, exit_pnl
 
 
 def _close_all(
@@ -238,12 +273,18 @@ def _close_all(
     features: dict[str, dict[str, FeatureRow]],
     costs: CostModel,
     trades: list[Trade],
-) -> None:
+) -> float:
+    """Returns the residual return to book — the slippage between the close the
+    book was already marked at and the actual exit fill."""
+    residual = 0.0
     for code, pos in list(positions.items()):
         bar = bars.get(code, {}).get(date)
         if not bar:
             continue
         fill = costs.exit_fill_price(bar.close, _atr_of(features, code, date), pos.side)
+        if bar.close:
+            leg = (fill - bar.close) / bar.close
+            residual += pos.weight * (leg if pos.side == "long" else -leg)
         gross = (
             (fill - pos.entry_price) / pos.entry_price
             if pos.side == "long"
@@ -266,3 +307,4 @@ def _close_all(
             )
         )
         del positions[code]
+    return residual

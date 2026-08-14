@@ -5,6 +5,21 @@ sqrt(252) at the point of reporting. The design blueprint is explicit that
 the statistical validation layer (DSR/PBO) must be fed *daily* SRs — mixing
 annualized and daily values silently inflates the deflated Sharpe — so the
 daily figure is kept alongside the annualized one rather than discarded.
+
+Two different bases live here on purpose, and comparing them directly will
+mislead:
+
+- Sharpe/Sortino/Calmar/maxDD come from the daily return series, i.e. a
+  constant-weight book rebalanced each session. This is the equity path.
+- expectancy/profit_factor/win_rate come from trade PnL, a simple return
+  per position over its own holding period.
+
+For longs the two reconcile exactly once compounded. For shorts they cannot:
+a name going 100 -> 200 -> 100 leaves a simple short return of 0% but a
+daily-compounded one of -100%, because the position is wiped out on the way
+up. The daily series is the honest path and stays the basis for the
+statistics; profit factor below 1 alongside a positive Sharpe is therefore
+possible for short-heavy strategies and is not by itself evidence of a bug.
 """
 from __future__ import annotations
 

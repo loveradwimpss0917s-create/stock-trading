@@ -147,6 +147,110 @@ class TestReturnsAndCosts:
         assert result.trades[0].pnl is not None
 
 
+def compounded(returns):
+    total = 1.0
+    for r in returns:
+        total *= 1 + r
+    return total - 1
+
+
+def compounded_trades(trades):
+    """Sequential single-name trades compound, they don't sum — each trade's
+    pnl is a simple return over its own holding period."""
+    total = 1.0
+    for t in trades:
+        total *= 1 + (t.pnl or 0.0)
+    return total - 1
+
+
+class TestAccountingConsistency:
+    """The daily return series and the trade list must describe the same book.
+
+    They diverged in the first version: fills were executed *after* the mark
+    step, so an entry day's open->close move was missing from the returns but
+    present in trade PnL. Live, that showed up as annualized Sharpe 1.07
+    alongside a profit factor of 0.82 — a combination that cannot happen if
+    both are measuring the same positions.
+
+    Compared by compounding, not summing: the equity curve multiplies daily
+    returns while a trade's pnl is a simple return over its holding period.
+    """
+
+    def test_single_trade_pnl_matches_the_compounded_daily_returns(self):
+        bars = bars_from_closes("A", [100, 105, 110, 115, 120], opens=[100, 102, 108, 112, 118])
+        result = run_backtest(
+            AlwaysLong("A"), bars, features_all("A", 0.0), CAL, cost_model=NO_COSTS, rebalance_every=99
+        )
+        assert abs(compounded(result.returns) - compounded_trades(result.trades)) < 1e-9
+
+    def test_holds_with_a_gap_between_close_and_next_open_still_reconcile(self):
+        # Overnight gaps are where an off-by-one in the marking base shows up.
+        bars = bars_from_closes("A", [100, 90, 130, 95, 140], opens=[100, 120, 80, 125, 85])
+        result = run_backtest(
+            AlwaysLong("A"), bars, features_all("A", 0.0), CAL, cost_model=NO_COSTS, rebalance_every=99
+        )
+        assert abs(compounded(result.returns) - compounded_trades(result.trades)) < 1e-9
+
+    def test_reconciles_when_positions_are_rolled_every_session(self):
+        bars = bars_from_closes("A", [100, 103, 99, 107, 111], opens=[100, 101, 104, 98, 109])
+        result = run_backtest(
+            AlwaysLong("A"), bars, features_all("A", 0.0), CAL, cost_model=NO_COSTS, rebalance_every=1
+        )
+        assert abs(compounded(result.returns) - compounded_trades(result.trades)) < 1e-9
+
+    def test_short_daily_series_and_trade_pnl_agree_in_sign_but_not_magnitude(self):
+        """Shorts genuinely cannot reconcile exactly, and that is not a bug.
+
+        The daily series is a constant-weight short (rebalanced each session);
+        trade pnl is the simple return on the initial notional. Take 100 ->
+        200 -> 100: the simple short return is 0%, while the daily-compounded
+        one is -100% — the position is wiped out on the way up and never gets
+        it back. The daily series is the honest equity path, so it stays the
+        basis for Sharpe/DSR; trade pnl remains a per-position figure.
+        """
+
+        @dataclass
+        class AlwaysShort:
+            name: str = "always_short"
+
+            def target_weights(self, asof, features):
+                return {"A": -1.0}
+
+        bars = bars_from_closes("A", [100, 95, 105, 90, 85], opens=[100, 97, 102, 92, 88])
+        result = run_backtest(
+            AlwaysShort(), bars, features_all("A", 0.0), CAL, cost_model=NO_COSTS, rebalance_every=99
+        )
+        # A falling price must profit the short on both measures.
+        assert compounded(result.returns) > 0
+        assert compounded_trades(result.trades) > 0
+
+    def test_short_compounding_penalises_a_round_trip_that_looks_flat(self):
+        # The case that proves the two bases differ on purpose.
+        bars = bars_from_closes("A", [100, 200, 100, 100, 100], opens=[100, 100, 200, 100, 100])
+
+        @dataclass
+        class AlwaysShort:
+            name: str = "always_short"
+
+            def target_weights(self, asof, features):
+                return {"A": -1.0}
+
+        result = run_backtest(
+            AlwaysShort(), bars, features_all("A", 0.0), CAL, cost_model=NO_COSTS, rebalance_every=99
+        )
+        # Price ends where the short was opened, yet the equity path is down.
+        assert compounded(result.returns) < -0.4
+
+    def test_slippage_cost_appears_in_both_the_returns_and_the_trade(self):
+        bars = bars_from_closes("A", [100] * 5)
+        costly = CostModel(commission_rate=0.0, min_slippage_rate=0.01, atr_slippage_fraction=0.0)
+        result = run_backtest(
+            AlwaysLong("A"), bars, features_all("A", 0.0), CAL, cost_model=costly, rebalance_every=99
+        )
+        assert compounded(result.returns) < 0
+        assert abs(compounded(result.returns) - compounded_trades(result.trades)) < 1e-9
+
+
 class TestMissingData:
     def test_a_code_with_no_bar_on_the_fill_date_is_skipped_not_crashed(self):
         bars = bars_from_closes("A", [100] * 5)
