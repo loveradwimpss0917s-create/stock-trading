@@ -620,3 +620,17 @@ body {
   font-size: 11px;
   color: var(--text-dim);
 }
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 0 0;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}

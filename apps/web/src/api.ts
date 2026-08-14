@@ -87,6 +87,7 @@ export interface Candidate {
   name_ja: string | null;
   sector33: string | null;
   scale_category: string | null;
+  theme_sort_order: number | null;
 }
 
 export const fetchThemes = () => get<{ themes: Theme[] }>('/api/themes');

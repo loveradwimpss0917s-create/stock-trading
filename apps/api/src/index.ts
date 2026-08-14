@@ -203,7 +203,10 @@ app.get('/api/candidates', async (c) => {
   const query: Record<string, string> = {
     select: '*',
     as_of: `eq.${asOf}`,
-    order: 'theme_key.asc,horizon.asc,rank.asc',
+    // By the themes' own sort_order (migration 0015), not by theme_key —
+    // alphabetical ordering interleaved sector and factor themes arbitrarily
+    // once there were twenty of them.
+    order: 'theme_sort_order.asc,horizon.asc,rank.asc',
   };
   if (theme) query.theme_key = `eq.${theme}`;
   if (horizon) query.horizon = `eq.${horizon}`;

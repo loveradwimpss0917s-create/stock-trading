@@ -59,8 +59,20 @@ export function CandidatesPanel() {
       list.push(c);
       map.set(c.theme_key, list);
     }
-    return [...map.entries()];
+    // Factor themes lead: they answer "what is setting up right now", which is
+    // the question this tab exists for. Sector themes narrow within an
+    // industry and read better as the second half of the page.
+    return [...map.entries()].sort(([, a], [, b]) => {
+      const kind = (c: Candidate) => (c.theme_kind === 'factor' ? 0 : 1);
+      return kind(a[0]!) - kind(b[0]!) || (a[0]!.theme_sort_order ?? 0) - (b[0]!.theme_sort_order ?? 0);
+    });
   }, [candidates]);
+
+  // Twenty themes at ten names each is 200 rows — unreadable as a landing
+  // view. Showing every theme's leaders keeps the page scannable, and picking
+  // a single theme opens it up to the full list.
+  const showAll = themeKey !== '';
+  const PREVIEW_ROWS = 5;
 
   return (
     <section className="panel">
@@ -167,7 +179,7 @@ export function CandidatesPanel() {
                 </tr>
               </thead>
               <tbody>
-                {list.map((c) => {
+                {(showAll ? list : list.slice(0, PREVIEW_ROWS)).map((c) => {
                   const qty = shares(capital, riskPct, c.entry_ref, c.stop_price);
                   const components = Object.entries(c.rationale?.components ?? {})
                     .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
@@ -194,6 +206,11 @@ export function CandidatesPanel() {
               </tbody>
             </table>
           </div>
+          {!showAll && list.length > PREVIEW_ROWS && (
+            <button className="link-btn" onClick={() => setThemeKey(key)}>
+              このテーマの{list.length}件をすべて表示 →
+            </button>
+          )}
         </div>
       ))}
 
