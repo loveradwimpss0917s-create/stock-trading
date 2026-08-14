@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  fetchFreshness,
   fetchStock,
   fetchStocks,
+  fetchStrategies,
   fetchSyncStatus,
   type DailyQuote,
+  type Freshness,
   type Security,
+  type StrategyResult,
   type SyncStatus,
 } from './api';
 import { PriceChart } from './PriceChart';
+import { StrategyPanel } from './StrategyPanel';
 
 function pctChange(quotes: DailyQuote[]): number | null {
   const closes = quotes.map((q) => (q.close === null ? NaN : Number(q.close))).filter((v) => !Number.isNaN(v));
@@ -25,9 +30,19 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ security: Security; quotes: DailyQuote[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [strategies, setStrategies] = useState<StrategyResult[]>([]);
+  const [passedCount, setPassedCount] = useState(0);
+  const [freshness, setFreshness] = useState<Freshness | null>(null);
 
   useEffect(() => {
     fetchSyncStatus().then(setStatus).catch((e) => setError(String(e)));
+    fetchFreshness().then(setFreshness).catch(() => {});
+    fetchStrategies()
+      .then((res) => {
+        setStrategies(res.strategies);
+        setPassedCount(res.passed_count);
+      })
+      .catch(() => {});
   }, []);
 
   // Debounced so typing a code doesn't fire a request per keystroke.
@@ -68,7 +83,17 @@ export default function App() {
   return (
     <main className="page">
       <div className="banner">
-        12週間遅延データに基づく研究結果であり、売買推奨ではありません。
+        <strong>売買には使えません。</strong>{' '}
+        {freshness?.days_behind != null ? (
+          <>
+            最新データは <span className="tabular">{freshness.latest_date}</span>（
+            <span className="tabular">{freshness.days_behind}日前</span>
+            ）。J-Quants Freeは12週間遅延のため、常にこの状態です。
+          </>
+        ) : (
+          <>12週間遅延データに基づく研究結果であり、売買推奨ではありません。</>
+        )}{' '}
+        本アプリの用途は「その戦略は統計的に本物か」の検証です。
       </div>
 
       <header className="header">
@@ -77,6 +102,8 @@ export default function App() {
       </header>
 
       {error && <p className="status-error">エラー: {error}</p>}
+
+      <StrategyPanel strategies={strategies} passedCount={passedCount} />
 
       {status && (
         <section className="stat-row">

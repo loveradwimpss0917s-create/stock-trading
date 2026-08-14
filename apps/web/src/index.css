@@ -312,3 +312,158 @@ body {
 .quotes .num {
   text-align: right;
 }
+
+/* Strategy validation panel */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 24px;
+}
+
+.panel h2 {
+  margin: 0 0 14px;
+  font-size: 16px;
+}
+
+.verdict {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  margin-bottom: 14px;
+}
+
+.verdict-none {
+  border-color: #5a2a2a;
+  background: #241618;
+}
+
+.verdict-ok {
+  border-color: #1f5a44;
+  background: #12241f;
+}
+
+.verdict-count {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.verdict-none .verdict-count {
+  color: var(--down);
+}
+
+.verdict-ok .verdict-count {
+  color: var(--up);
+}
+
+.verdict-label {
+  font-size: 14px;
+}
+
+.verdict-note {
+  flex-basis: 100%;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.pbo-line {
+  font-size: 13px;
+  margin: 0 0 14px;
+  line-height: 1.6;
+}
+
+.tone-ok {
+  color: var(--up);
+}
+
+.tone-bad {
+  color: var(--down);
+}
+
+.tone-warn {
+  color: #e8b84a;
+}
+
+/* DSR gauge, drawn against the 0.95 gate rather than against 1.0 */
+.gauge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 130px;
+}
+
+.gauge-track {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  background: var(--bg);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 70px;
+}
+
+.gauge-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+
+.gauge-ok {
+  background: var(--up);
+}
+
+.gauge-warn {
+  background: #e8b84a;
+}
+
+.gauge-bad {
+  background: var(--down);
+}
+
+.gauge-threshold {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 10px;
+  background: var(--text-dim);
+}
+
+.gauge-value {
+  font-size: 12px;
+}
+
+.pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.pill-ok {
+  background: #12241f;
+  color: var(--up);
+  border: 1px solid #1f5a44;
+}
+
+.pill-bad {
+  background: #241618;
+  color: var(--down);
+  border: 1px solid #5a2a2a;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.footnote {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+}

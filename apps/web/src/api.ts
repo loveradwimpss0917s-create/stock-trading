@@ -36,6 +36,39 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+export interface StrategyResult {
+  run_id: number;
+  strategy: string;
+  period_start: string | null;
+  period_end: string | null;
+  sharpe: number | null;
+  sortino: number | null;
+  calmar: number | null;
+  max_dd: number | null;
+  win_rate: number | null;
+  n_trades: number | null;
+  avg_holding_days: number | null;
+  profit_factor: number | null;
+  dsr: number | null;
+  pbo: number | null;
+  expected_max_sharpe: number | null;
+  n_trials: number | null;
+  skew: number | null;
+  kurtosis: number | null;
+  passed: boolean;
+}
+
+export interface Freshness {
+  latest_date: string | null;
+  days_behind: number | null;
+}
+
+export const fetchStrategies = () =>
+  get<{ strategies: StrategyResult[]; passed_count: number; gate: Record<string, string> }>(
+    '/api/strategies'
+  );
+export const fetchFreshness = () => get<Freshness>('/api/freshness');
+
 export const fetchSyncStatus = () => get<SyncStatus>('/api/sync/status');
 export const fetchStocks = (q?: string) =>
   get<{ stocks: Security[] }>(q ? `/api/stocks?q=${encodeURIComponent(q)}` : '/api/stocks');

@@ -144,6 +144,32 @@ app.get('/api/sync/status', async (c) => {
   );
 });
 
+/** Backtested strategies with their statistical verdict. */
+app.get('/api/strategies', async (c) => {
+  const rows = await selectFrom<Record<string, unknown>>(c.env, 'strategy_results', {
+    select: '*',
+    order: 'dsr.desc.nullslast',
+  });
+  return c.json({
+    strategies: rows,
+    // Surfaced so the UI can state the gate outcome rather than leaving the
+    // reader to infer it from four rows of numbers.
+    passed_count: rows.filter((r) => r.passed === true).length,
+    gate: { dsr: '> 0.95', pbo: '< 0.5', oos_sharpe: '> 0' },
+  });
+});
+
+/** How stale the data is — the reason this is a research tool, not a
+ * trading one. Computed rather than hardcoded so it stays true. */
+app.get('/api/freshness', async (c) => {
+  const rows = await selectFrom<{ latest_date: string | null; days_behind: number | null }>(
+    c.env,
+    'data_freshness',
+    { select: '*' }
+  );
+  return c.json(rows[0] ?? { latest_date: null, days_behind: null });
+});
+
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default app;
