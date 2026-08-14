@@ -11,8 +11,11 @@ import {
   type StrategyResult,
   type SyncStatus,
 } from './api';
+import { CandidatesPanel } from './CandidatesPanel';
 import { PriceChart } from './PriceChart';
 import { StrategyPanel } from './StrategyPanel';
+
+type Tab = 'candidates' | 'research';
 
 function pctChange(quotes: DailyQuote[]): number | null {
   const closes = quotes.map((q) => (q.close === null ? NaN : Number(q.close))).filter((v) => !Number.isNaN(v));
@@ -33,6 +36,7 @@ export default function App() {
   const [strategies, setStrategies] = useState<StrategyResult[]>([]);
   const [passedCount, setPassedCount] = useState(0);
   const [freshness, setFreshness] = useState<Freshness | null>(null);
+  const [tab, setTab] = useState<Tab>('candidates');
 
   useEffect(() => {
     fetchSyncStatus().then(setStatus).catch((e) => setError(String(e)));
@@ -103,7 +107,30 @@ export default function App() {
 
       {error && <p className="status-error">エラー: {error}</p>}
 
-      <StrategyPanel strategies={strategies} passedCount={passedCount} />
+      <nav className="tabs" role="tablist">
+        <button
+          role="tab"
+          aria-selected={tab === 'candidates'}
+          className={`tab${tab === 'candidates' ? ' is-active' : ''}`}
+          onClick={() => setTab('candidates')}
+        >
+          売買候補
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'research'}
+          className={`tab${tab === 'research' ? ' is-active' : ''}`}
+          onClick={() => setTab('research')}
+        >
+          検証・株価
+        </button>
+      </nav>
+
+      {tab === 'candidates' && <CandidatesPanel />}
+
+      {tab === 'research' && (
+        <>
+          <StrategyPanel strategies={strategies} passedCount={passedCount} />
 
       {status && (
         <section className="stat-row">
@@ -235,6 +262,8 @@ export default function App() {
           )}
         </section>
       </div>
+        </>
+      )}
     </main>
   );
 }

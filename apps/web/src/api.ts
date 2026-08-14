@@ -58,6 +58,49 @@ export interface StrategyResult {
   passed: boolean;
 }
 
+export interface Theme {
+  key: string;
+  name_ja: string;
+  kind: 'sector' | 'factor';
+  horizon: 'day' | 'swing' | 'both';
+  description: string | null;
+}
+
+export interface Candidate {
+  as_of: string;
+  theme_key: string;
+  theme_name: string;
+  theme_kind: string;
+  theme_description: string | null;
+  horizon: string;
+  side: string;
+  rank: number;
+  score: number;
+  entry_ref: number;
+  stop_price: number;
+  target_price: number;
+  atr_14: number;
+  rr_ratio: number;
+  rationale: { components?: Record<string, number>; atr_pct?: number } | null;
+  code: string;
+  ticker4: string;
+  name_ja: string | null;
+  sector33: string | null;
+  scale_category: string | null;
+}
+
+export const fetchThemes = () => get<{ themes: Theme[] }>('/api/themes');
+
+export const fetchCandidates = (theme?: string, horizon?: string) => {
+  const params = new URLSearchParams();
+  if (theme) params.set('theme', theme);
+  if (horizon) params.set('horizon', horizon);
+  const qs = params.toString();
+  return get<{ as_of: string | null; days_behind: number | null; candidates: Candidate[] }>(
+    qs ? `/api/candidates?${qs}` : '/api/candidates'
+  );
+};
+
 export interface Freshness {
   latest_date: string | null;
   days_behind: number | null;

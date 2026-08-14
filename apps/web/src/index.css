@@ -467,3 +467,156 @@ body {
   font-size: 12px;
   line-height: 1.6;
 }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.panel-head h2 {
+  margin: 0;
+}
+
+/* Horizon segmented control */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.seg-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.seg-btn.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* as-of notice */
+.asof {
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 14px;
+  line-height: 1.6;
+}
+
+.asof-fresh {
+  background: #12241f;
+  border: 1px solid #1f5a44;
+  color: var(--up);
+}
+
+.asof-stale {
+  background: #2a2410;
+  border: 1px solid #5a4c1a;
+  color: #e8d27a;
+}
+
+.filters {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.select,
+.num-input {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 9px;
+}
+
+.select:focus,
+.num-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.num-input {
+  width: 130px;
+}
+
+.theme-block {
+  margin-bottom: 22px;
+}
+
+.theme-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 2px;
+  font-size: 14px;
+}
+
+.theme-kind {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+.theme-desc {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.reasons {
+  font-size: 11px;
+  color: var(--text-dim);
+}
