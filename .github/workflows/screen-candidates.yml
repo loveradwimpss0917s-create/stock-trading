@@ -1,0 +1,38 @@
+name: screen-candidates
+on:
+  workflow_dispatch:
+    inputs:
+      top_n:
+        description: "Candidates per theme/horizon"
+        default: "10"
+  # Chained after the daily ingest so candidates track the newest session
+  # without a second manual step.
+  workflow_run:
+    workflows: ["ingest-daily"]
+    types: [completed]
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # On the chained trigger, only proceed if the ingest actually succeeded.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r pipeline_py/requirements.txt
+      - name: Rebuild features
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m pipeline_py.features.build_features
+      - name: Screen candidates
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >
+          python -m pipeline_py.screening.run
+          --top-n ${{ github.event.inputs.top_n || '10' }}
+          --persist

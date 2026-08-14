@@ -170,6 +170,52 @@ app.get('/api/freshness', async (c) => {
   return c.json(rows[0] ?? { latest_date: null, days_behind: null });
 });
 
+/** Themes available for screening. */
+app.get('/api/themes', async (c) => {
+  const themes = await selectFrom<Record<string, unknown>>(c.env, 'themes', {
+    select: 'key,name_ja,kind,horizon,description,sort_order',
+    enabled: 'eq.true',
+    order: 'sort_order.asc',
+  });
+  return c.json({ themes });
+});
+
+/** Ranked trade candidates for the most recent screened session.
+ *
+ * `as_of` is that session, NOT today. On the Free plan it trails by ~12
+ * weeks; the response always carries it (and days_behind) so the UI can say
+ * so rather than implying these are today's picks.
+ */
+app.get('/api/candidates', async (c) => {
+  const theme = c.req.query('theme');
+  const horizon = c.req.query('horizon');
+
+  const asOfRows = await selectFrom<{ as_of: string | null; days_behind: number | null }>(
+    c.env,
+    'candidates_asof',
+    { select: '*' }
+  );
+  const asOf = asOfRows[0]?.as_of ?? null;
+  if (!asOf) {
+    return c.json({ as_of: null, days_behind: null, candidates: [] });
+  }
+
+  const query: Record<string, string> = {
+    select: '*',
+    as_of: `eq.${asOf}`,
+    order: 'theme_key.asc,horizon.asc,rank.asc',
+  };
+  if (theme) query.theme_key = `eq.${theme}`;
+  if (horizon) query.horizon = `eq.${horizon}`;
+
+  const candidates = await selectFrom<Record<string, unknown>>(
+    c.env,
+    'trade_candidates_view',
+    query
+  );
+  return c.json({ as_of: asOf, days_behind: asOfRows[0]?.days_behind ?? null, candidates });
+});
+
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default app;
