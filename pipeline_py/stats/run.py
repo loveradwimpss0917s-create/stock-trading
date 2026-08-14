@@ -54,6 +54,11 @@ def evaluate(runs: list[dict[str, Any]], n_blocks: int = DEFAULT_BLOCKS) -> list
     length = min(len(s) for s in series)
     matrix = [[s[t] for s in series] for t in range(length)]
 
+    # One PBO for the whole search, by definition: CSCV measures whether
+    # *selecting* the in-sample winner generalizes, which is a property of
+    # the trial set rather than of any single strategy. Every run row
+    # therefore carries the same value — that repetition is the metric
+    # working as intended, not a copy-paste bug.
     pbo_result = pbo_cscv(matrix, n_blocks=n_blocks)
 
     daily_sharpes = [sharpe_ratio(s[:length], annualize=False) for s in series]
