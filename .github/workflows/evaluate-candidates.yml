@@ -1,0 +1,28 @@
+name: evaluate-candidates
+on:
+  workflow_dispatch:
+    inputs:
+      top_n:
+        description: "Candidates per theme/horizon to replay"
+        default: "10"
+      every:
+        description: "Replay every Nth session (5 = weekly)"
+        default: "5"
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r pipeline_py/requirements.txt
+      - name: Replay the screen and score its candidates
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >
+          python -m pipeline_py.screening.evaluate
+          --top-n ${{ github.event.inputs.top_n || '10' }}
+          --every ${{ github.event.inputs.every || '5' }}
+          --persist

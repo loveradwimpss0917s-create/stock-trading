@@ -14,8 +14,9 @@ import {
 import { CandidatesPanel } from './CandidatesPanel';
 import { PriceChart } from './PriceChart';
 import { StrategyPanel } from './StrategyPanel';
+import { ThemePerformancePanel } from './ThemePerformancePanel';
 
-type Tab = 'candidates' | 'research';
+type Tab = 'candidates' | 'results' | 'research';
 
 function pctChange(quotes: DailyQuote[]): number | null {
   const closes = quotes.map((q) => (q.close === null ? NaN : Number(q.close))).filter((v) => !Number.isNaN(v));
@@ -118,6 +119,14 @@ export default function App() {
         </button>
         <button
           role="tab"
+          aria-selected={tab === 'results'}
+          className={`tab${tab === 'results' ? ' is-active' : ''}`}
+          onClick={() => setTab('results')}
+        >
+          結果
+        </button>
+        <button
+          role="tab"
           aria-selected={tab === 'research'}
           className={`tab${tab === 'research' ? ' is-active' : ''}`}
           onClick={() => setTab('research')}
@@ -127,6 +136,7 @@ export default function App() {
       </nav>
 
       {tab === 'candidates' && <CandidatesPanel />}
+      {tab === 'results' && <ThemePerformancePanel />}
 
       {tab === 'research' && (
         <>

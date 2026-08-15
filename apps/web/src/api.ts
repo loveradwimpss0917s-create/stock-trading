@@ -90,6 +90,25 @@ export interface Candidate {
   theme_sort_order: number | null;
 }
 
+export interface ThemePerformance {
+  theme_key: string;
+  theme_name: string;
+  theme_kind: string;
+  horizon: string;
+  n_trades: number;
+  n_no_entry: number;
+  n_target: number;
+  n_stop: number;
+  n_timeout: number;
+  avg_r: number | null;
+  win_rate: number | null;
+  first_as_of: string | null;
+  last_as_of: string | null;
+}
+
+export const fetchThemePerformance = () =>
+  get<{ performance: ThemePerformance[] }>('/api/theme-performance');
+
 export const fetchThemes = () => get<{ themes: Theme[] }>('/api/themes');
 
 export const fetchCandidates = (theme?: string, horizon?: string) => {

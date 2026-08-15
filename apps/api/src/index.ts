@@ -219,6 +219,22 @@ app.get('/api/candidates', async (c) => {
   return c.json({ as_of: asOf, days_behind: asOfRows[0]?.days_behind ?? null, candidates });
 });
 
+/** How each theme's picks actually turned out.
+ *
+ * A replay of the screen over history: entry at the next open, exit at the
+ * stop, the target, or the hold limit. This is a description of what
+ * happened, not out-of-sample proof — the same window that produced the
+ * themes is the window being measured, which is what DSR/PBO exists to
+ * distrust. The UI has to say so.
+ */
+app.get('/api/theme-performance', async (c) => {
+  const rows = await selectFrom<Record<string, unknown>>(c.env, 'theme_performance', {
+    select: '*',
+    order: 'theme_sort_order.asc,horizon.asc',
+  });
+  return c.json({ performance: rows });
+});
+
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default app;
