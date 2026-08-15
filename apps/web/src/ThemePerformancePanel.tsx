@@ -5,6 +5,10 @@ const HORIZON_LABEL: Record<string, string> = { day: 'デイ', swing: 'スイン
 
 /** Below this many trades a hit rate is noise dressed up as a number. */
 const MIN_TRADES_TO_READ = 30;
+/** Standard errors an edge must clear before it is worth a second look. Not a
+ * significance claim — with 21 themes compared at once, roughly one crosses
+ * this by chance under the null. */
+const T_NOTABLE = 2.0;
 
 function pct(v: number | null): string {
   return v == null ? '—' : `${(v * 100).toFixed(1)}%`;
@@ -106,6 +110,7 @@ export function ThemePerformancePanel() {
                 <tr>
                   <th>テーマ</th>
                   <th className="num">選別効果</th>
+                  <th className="num">t値</th>
                   <th className="num">平均損益(R)</th>
                   <th className="num">勝率</th>
                   <th className="num">件数</th>
@@ -119,6 +124,9 @@ export function ThemePerformancePanel() {
                 {visible.map((r) => {
                   const thin = r.n_trades < MIN_TRADES_TO_READ;
                   const edge = r.edge_r;
+                  // An edge inside the noise band is not an effect, however
+                  // large the R looks, so it is greyed rather than coloured.
+                  const notable = Math.abs(r.t_stat ?? 0) >= T_NOTABLE;
                   return (
                     <tr key={`${r.theme_key}/${r.horizon}`}>
                       <td>
@@ -129,10 +137,21 @@ export function ThemePerformancePanel() {
                         {thin && <span className="theme-kind">件数不足</span>}
                       </td>
                       <td
-                        className={`num tabular ${(edge ?? 0) > 0 ? 'up' : 'down'}`}
-                        title="テーマの平均R − 無選別に買った場合の平均R。正なら選別が効いている"
+                        className={`num tabular ${notable ? ((edge ?? 0) > 0 ? 'up' : 'down') : 'muted'}`}
+                        title={
+                          notable
+                            ? 'テーマの平均R − 無選別に買った場合の平均R'
+                            : 'ばらつきの範囲内。差はあるが偶然と区別できない'
+                        }
                       >
                         {edge == null ? '—' : `${edge > 0 ? '+' : ''}${edge.toFixed(2)}R`}
+                      </td>
+                      <td
+                        className={`num tabular ${notable ? '' : 'muted'}`}
+                        title="選別効果 ÷ 標準誤差。|t| が2未満なら偶然と区別できない"
+                      >
+                        {r.t_stat == null ? '—' : r.t_stat.toFixed(2)}
+                        {!notable && ' 〓'}
                       </td>
                       <td
                         className="num tabular"
@@ -167,6 +186,20 @@ export function ThemePerformancePanel() {
             勝率で並べないのも同じ理由で、勝率70%でも1回0.3Rなら勝率30%で3R取るテーマに負けます。
             件数が{MIN_TRADES_TO_READ}件未満のテーマには「件数不足」と付けています —
             数字は出ますが、偶然と区別できません。
+          </p>
+          <p className="muted footnote">
+            <strong>t値が2未満の行（〓）は、差はあっても偶然と区別できません。</strong>
+            1取引あたりのRのばらつきは標準偏差で1.2〜1.9あり、800件でも標準誤差は0.04〜0.10Rです。
+            0.02Rの差に意味はありません。
+            しかもこのt値は<strong>上限であって下限ではありません</strong>：
+            週次サンプリングに対して保有10営業日なので取引期間が重なっており実効サンプル数は件数より少なく、
+            さらに21テーマを同時に比較しているので、全テーマが無力でも|t|&gt;2が1つ程度は偶然出ます。
+          </p>
+          <p className="muted footnote">
+            <strong>業種テーマの選別効果は「銘柄選び」ではなく「業種選び」の結果です。</strong>
+            対照群が市場全体なので、鉄鋼テーマの数字は「鉄鋼株の中で良い銘柄を選べた」ではなく
+            「この期間に鉄鋼セクターが市場を上回った」を測っています。両者を分けるには
+            対照群を業種内の平均にする必要があり、現状では区別できていません。
           </p>
           <p className="muted footnote">
             日足しか無いため、<strong>同じ日に損切りと目標の両方に触れた場合は損切り扱い</strong>です。

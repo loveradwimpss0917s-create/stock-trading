@@ -109,6 +109,10 @@ export interface ThemePerformance {
   baseline_win_rate: number | null;
   edge_r: number | null;
   edge_win_rate: number | null;
+  sd_r: number | null;
+  se_r: number | null;
+  /** edge_r in standard errors. An upper bound — see the panel's footnote. */
+  t_stat: number | null;
 }
 
 export interface Baseline {
