@@ -104,10 +104,22 @@ export interface ThemePerformance {
   win_rate: number | null;
   first_as_of: string | null;
   last_as_of: string | null;
+  /** The same measurement over every eligible name — what picking must beat. */
+  baseline_avg_r: number | null;
+  baseline_win_rate: number | null;
+  edge_r: number | null;
+  edge_win_rate: number | null;
+}
+
+export interface Baseline {
+  horizon: string;
+  n_trades: number;
+  avg_r: number | null;
+  win_rate: number | null;
 }
 
 export const fetchThemePerformance = () =>
-  get<{ performance: ThemePerformance[] }>('/api/theme-performance');
+  get<{ performance: ThemePerformance[]; baseline: Baseline[] }>('/api/theme-performance');
 
 export const fetchThemes = () => get<{ themes: Theme[] }>('/api/themes');
 

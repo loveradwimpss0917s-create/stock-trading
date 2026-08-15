@@ -32,7 +32,7 @@ from typing import Optional
 from ..ingest.supabase_client import SupabaseUpsertClient
 from ..ingest.universe import is_operating_company
 from .run import FEATURE_COLUMNS
-from .scoring import score_theme
+from .scoring import levels_for, score_theme
 
 # Sessions a position is given before it is closed at the market.
 # A day candidate is entered at the open and closed at that session's close;
@@ -203,6 +203,74 @@ def replay(
     return rows
 
 
+def baseline(
+    features_by_date: dict[str, dict[str, dict]],
+    bars_by_code: dict[str, list[Bar]],
+    securities: dict[str, dict],
+    dates: list[str],
+    turnover_by_date: dict[tuple[str, str], float] | None = None,
+) -> list[dict]:
+    """The control: buy EVERY eligible name, same sessions, same levels.
+
+    Without this the theme numbers are unreadable. This window was a rising
+    market, and a long-only screen returns a positive R in a rising market
+    whether or not its picks were any good. What a theme has to beat is not
+    zero — it is this.
+    """
+    index_by_code = {
+        code: {b.date: i for i, b in enumerate(bars)} for code, bars in bars_by_code.items()
+    }
+    turnover_by_date = turnover_by_date or {}
+
+    out_rows: list[dict] = []
+    for as_of in dates:
+        per_horizon: dict[str, dict[str, float]] = {
+            h: {"n": 0, "no_entry": 0, "sum_r": 0.0, "wins": 0} for h in MAX_HOLD
+        }
+        for code, f in features_by_date.get(as_of, {}).items():
+            sec = securities.get(code)
+            idx = index_by_code.get(code, {}).get(as_of)
+            if not sec or idx is None:
+                continue
+            row = {
+                **{k: f.get(k) for k in FEATURE_COLUMNS},
+                "close": bars_by_code[code][idx].close,
+                "turnover_value": turnover_by_date.get((code, as_of)),
+            }
+            for horizon in MAX_HOLD:
+                levels = levels_for(row, horizon)
+                if levels is None:
+                    continue
+                _close, _atr, stop, target = levels
+                bars = bars_by_code[code]
+                if idx + 1 >= len(bars):
+                    continue
+                res = evaluate(bars, idx + 1, stop, target, MAX_HOLD[horizon])
+                acc = per_horizon[horizon]
+                if res.outcome == "no_entry":
+                    acc["no_entry"] += 1
+                    continue
+                acc["n"] += 1
+                acc["sum_r"] += res.r_multiple or 0.0
+                if (res.r_multiple or 0.0) > 0:
+                    acc["wins"] += 1
+
+        for horizon, acc in per_horizon.items():
+            if acc["n"] == 0:
+                continue
+            out_rows.append(
+                {
+                    "as_of": as_of,
+                    "horizon": horizon,
+                    "n_trades": int(acc["n"]),
+                    "n_no_entry": int(acc["no_entry"]),
+                    "sum_r": round(acc["sum_r"], 6),
+                    "n_wins": int(acc["wins"]),
+                }
+            )
+    return out_rows
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Replay the screen and score its candidates")
     parser.add_argument("--top-n", type=int, default=10)
@@ -260,6 +328,18 @@ def main(argv: list[str] | None = None) -> int:
         if not rows:
             raise RuntimeError("replay produced nothing — check features and themes")
 
+        base = baseline(features_by_date, bars_by_code, securities, dates, turnover)
+        print(f"[eval] {len(base)} baseline session rows", flush=True)
+        for h in sorted(MAX_HOLD):
+            hb = [b for b in base if b["horizon"] == h]
+            n = sum(b["n_trades"] for b in hb)
+            if n:
+                print(
+                    f"[eval] baseline {h}: {n} trades, avg "
+                    f"{sum(b['sum_r'] for b in hb) / n:+.4f}R",
+                    flush=True,
+                )
+
         if args.persist:
             for i in range(0, len(rows), 500):
                 db.upsert(
@@ -267,7 +347,10 @@ def main(argv: list[str] | None = None) -> int:
                     rows[i : i + 500],
                     on_conflict="as_of,theme_key,code,horizon",
                 )
-            print(f"[eval] persisted {len(rows)}", flush=True)
+            print(f"[eval] persisted {len(rows)} outcomes", flush=True)
+            for i in range(0, len(base), 500):
+                db.upsert("screen_baseline", base[i : i + 500], on_conflict="as_of,horizon")
+            print(f"[eval] persisted {len(base)} baseline rows", flush=True)
 
     return 0
 

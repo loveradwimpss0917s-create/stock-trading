@@ -129,3 +129,33 @@ class TestAccounting:
         seen = {evaluate(b, 0, s, t, 2).outcome for b, s, t in cases}
         assert seen <= {"target", "stop", "timeout", "no_entry"}
         assert len(seen) == 4  # each case exercises a different branch
+
+
+class TestBaselineIsAControl:
+    """The baseline exists to answer "did picking help, or did the market just
+    go up". That only works if it measures the same universe under the same
+    levels as the themes — so these pin the shared code path rather than the
+    numbers."""
+
+    def test_baseline_uses_the_same_levels_helper_as_the_screen(self):
+        from pipeline_py.screening import evaluate as ev
+        from pipeline_py.screening.scoring import levels_for
+
+        # Both call levels_for; a second copy of the filter/ATR logic would
+        # silently stop the control from being a control.
+        assert ev.levels_for is levels_for
+
+    def test_levels_match_what_score_theme_publishes(self):
+        from pipeline_py.screening.scoring import levels_for, score_theme
+        from pipeline_py.tests.test_screening import BREAKOUT, row, universe
+
+        rows = universe(TOP=row(dist_52w_high=-0.01, ret_20d=0.4))
+        [top] = [c for c in score_theme(rows, BREAKOUT, "swing", top_n=1)]
+        _close, _atr, stop, target = levels_for(rows[top.code], "swing")
+        assert (round(stop, 2), round(target, 2)) == (top.stop_price, top.target_price)
+
+    def test_an_illiquid_name_is_excluded_from_the_control_too(self):
+        from pipeline_py.screening.scoring import MIN_TURNOVER, levels_for
+        from pipeline_py.tests.test_screening import row
+
+        assert levels_for(row(turnover_value=MIN_TURNOVER - 1), "swing") is None

@@ -126,6 +126,27 @@ def _passes_liquidity(row: dict, horizon: str) -> tuple[bool, Optional[str]]:
     return True, None
 
 
+def levels_for(row: dict, horizon: str) -> Optional[tuple[float, float, float, float]]:
+    """(close, atr, stop, target) for a tradable row, or None.
+
+    The single place the liquidity filters and the ATR multiples are applied.
+    The baseline control in evaluate.py measures the same universe under the
+    same levels, and a control built from a second copy of this logic would
+    stop being a control the moment one copy changed.
+    """
+    ok, _reason = _passes_liquidity(row, horizon)
+    if not ok:
+        return None
+
+    close = row.get("close")
+    atr = row.get("atr_14")
+    if not close or not atr or float(atr) <= 0:
+        return None
+    close = float(close)
+    atr = float(atr)
+    return close, atr, close - STOP_ATR_MULT[horizon] * atr, close + TARGET_ATR_MULT[horizon] * atr
+
+
 def score_theme(
     rows: dict[str, dict],
     theme: dict,
@@ -153,16 +174,10 @@ def score_theme(
 
     scored: list[Candidate] = []
     for code, row in pool.items():
-        ok, _reason = _passes_liquidity(row, horizon)
-        if not ok:
+        levels = levels_for(row, horizon)
+        if levels is None:
             continue
-
-        close = row.get("close")
-        atr = row.get("atr_14")
-        if not close or not atr or float(atr) <= 0:
-            continue
-        close = float(close)
-        atr = float(atr)
+        close, atr, stop, target = levels
 
         breakdown = {}
         total = 0.0
@@ -176,8 +191,6 @@ def score_theme(
         if not breakdown:
             continue
 
-        stop = close - STOP_ATR_MULT[horizon] * atr
-        target = close + TARGET_ATR_MULT[horizon] * atr
         risk = close - stop
         reward = target - close
         scored.append(

@@ -228,11 +228,18 @@ app.get('/api/candidates', async (c) => {
  * distrust. The UI has to say so.
  */
 app.get('/api/theme-performance', async (c) => {
-  const rows = await selectFrom<Record<string, unknown>>(c.env, 'theme_performance', {
-    select: '*',
-    order: 'theme_sort_order.asc,horizon.asc',
-  });
-  return c.json({ performance: rows });
+  // theme_edge, not theme_performance: the window was a rising market, and a
+  // long-only screen posts a positive R in one whether or not its picks were
+  // good. edge_r is the theme against buying everything eligible, which is
+  // the only number that says whether selecting helped.
+  const [rows, baseline] = await Promise.all([
+    selectFrom<Record<string, unknown>>(c.env, 'theme_edge', {
+      select: '*',
+      order: 'theme_sort_order.asc,horizon.asc',
+    }),
+    selectFrom<Record<string, unknown>>(c.env, 'screen_baseline_summary', { select: '*' }),
+  ]);
+  return c.json({ performance: rows, baseline });
 });
 
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));

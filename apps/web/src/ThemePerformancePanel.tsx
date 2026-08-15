@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchThemePerformance, type ThemePerformance } from './api';
+import { fetchThemePerformance, type Baseline, type ThemePerformance } from './api';
 
 const HORIZON_LABEL: Record<string, string> = { day: 'デイ', swing: 'スイング' };
 
@@ -12,27 +12,33 @@ function pct(v: number | null): string {
 
 export function ThemePerformancePanel() {
   const [rows, setRows] = useState<ThemePerformance[]>([]);
+  const [baselines, setBaselines] = useState<Baseline[]>([]);
   const [horizon, setHorizon] = useState<'day' | 'swing'>('swing');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchThemePerformance()
-      .then((r) => setRows(r.performance))
+      .then((r) => {
+        setRows(r.performance);
+        setBaselines(r.baseline);
+      })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, []);
 
-  // Ranked by average R rather than by win rate: a theme that is right 30% of
-  // the time for 3R beats one that is right 70% of the time for 0.3R, and
-  // sorting by hit rate would put the second one on top.
+  // Ranked by edge over the baseline, not by raw R. In a rising market every
+  // long-only theme posts a positive R, so sorting by that ranks themes by how
+  // much market they held, not by how well they picked.
   const visible = useMemo(
     () =>
       rows
         .filter((r) => r.horizon === horizon)
-        .sort((a, b) => (b.avg_r ?? -Infinity) - (a.avg_r ?? -Infinity)),
+        .sort((a, b) => (b.edge_r ?? -Infinity) - (a.edge_r ?? -Infinity)),
     [rows, horizon]
   );
+
+  const baseline = baselines.find((b) => b.horizon === horizon);
 
   const period = rows.length
     ? `${rows.reduce((m, r) => (r.first_as_of && r.first_as_of < m ? r.first_as_of : m), '9999')} 〜 ${rows.reduce((m, r) => (r.last_as_of && r.last_as_of > m ? r.last_as_of : m), '0000')}`
@@ -74,11 +80,32 @@ export function ThemePerformancePanel() {
             将来も同じ成績が出る証拠ではありません。
           </div>
 
+          {baseline && (
+            <div className="verdict">
+              <span className="verdict-count tabular">
+                {baseline.avg_r == null
+                  ? '—'
+                  : `${baseline.avg_r > 0 ? '+' : ''}${baseline.avg_r.toFixed(2)}R`}
+              </span>
+              <span className="verdict-label">
+                対照群：<strong>全銘柄を無選別に買った</strong>場合の平均
+                （{baseline.n_trades.toLocaleString('ja-JP')}件、勝率 {pct(baseline.win_rate)}）
+              </span>
+              <p className="verdict-note">
+                この期間は相場が上昇したため、買いのみなら銘柄を選ばなくてもプラスになります。
+                テーマが超えるべき基準は0ではなく<strong>この数字</strong>です。
+                下表の<strong>選別効果</strong>がそれとの差で、これが正でなければ
+                そのテーマは無選別に買うのと比べて何も足していません。
+              </p>
+            </div>
+          )}
+
           <div className="table-scroll">
             <table className="quotes">
               <thead>
                 <tr>
                   <th>テーマ</th>
+                  <th className="num">選別効果</th>
                   <th className="num">平均損益(R)</th>
                   <th className="num">勝率</th>
                   <th className="num">件数</th>
@@ -91,6 +118,7 @@ export function ThemePerformancePanel() {
               <tbody>
                 {visible.map((r) => {
                   const thin = r.n_trades < MIN_TRADES_TO_READ;
+                  const edge = r.edge_r;
                   return (
                     <tr key={`${r.theme_key}/${r.horizon}`}>
                       <td>
@@ -101,7 +129,13 @@ export function ThemePerformancePanel() {
                         {thin && <span className="theme-kind">件数不足</span>}
                       </td>
                       <td
-                        className={`num tabular ${(r.avg_r ?? 0) > 0 ? 'up' : 'down'}`}
+                        className={`num tabular ${(edge ?? 0) > 0 ? 'up' : 'down'}`}
+                        title="テーマの平均R − 無選別に買った場合の平均R。正なら選別が効いている"
+                      >
+                        {edge == null ? '—' : `${edge > 0 ? '+' : ''}${edge.toFixed(2)}R`}
+                      </td>
+                      <td
+                        className="num tabular"
                         title="1回の取引で、損切り幅の何倍を得たか（平均）"
                       >
                         {r.avg_r == null ? '—' : `${r.avg_r > 0 ? '+' : ''}${r.avg_r.toFixed(2)}R`}
@@ -127,9 +161,10 @@ export function ThemePerformancePanel() {
             円ではなくこの単位で揃えないとテーマ同士を比べられません。
           </p>
           <p className="muted footnote">
-            <strong>勝率ではなく平均損益(R)で並べています。</strong>
-            勝率70%でも1回の利益が0.3Rなら、勝率30%で3R取るテーマに負けます。
-            勝率だけを見ると判断を誤ります。
+            <strong>並び順は選別効果（対照群との差）です。</strong>
+            平均Rで並べると、上昇相場では「どれだけ相場に乗っていたか」の順になってしまい、
+            銘柄選別の巧拙が見えません。
+            勝率で並べないのも同じ理由で、勝率70%でも1回0.3Rなら勝率30%で3R取るテーマに負けます。
             件数が{MIN_TRADES_TO_READ}件未満のテーマには「件数不足」と付けています —
             数字は出ますが、偶然と区別できません。
           </p>
