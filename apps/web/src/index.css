@@ -299,6 +299,11 @@ body {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   text-align: left;
+  /* Without this, a cell squeezed narrower than its Japanese text (no
+     spaces to break on) wraps one character per line instead of scrolling
+     — the table-scroll wrapper's overflow-x only kicks in once the table
+     is actually wider than the viewport. */
+  white-space: nowrap;
 }
 
 .quotes th {
@@ -474,6 +479,11 @@ body {
   gap: 4px;
   margin-bottom: 18px;
   border-bottom: 1px solid var(--border);
+  /* 8 tabs don't fit one line on a phone; scroll horizontally rather than
+     wrapping or letting them get crushed into vertical text. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .tab {
@@ -483,6 +493,8 @@ body {
   color: var(--text-dim);
   font: inherit;
   font-size: 14px;
+  white-space: nowrap;
+  flex-shrink: 0;
   padding: 8px 14px;
   cursor: pointer;
 }
