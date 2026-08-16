@@ -1,0 +1,166 @@
+"""Risk Engine: turns a trade plan's price levels into a position size and a
+BUY / WAIT / PASS verdict.
+
+Every gate here is arithmetic: R:R, lot size, notional, portfolio heat,
+open-position count, sector concentration, turnover, liquidity. None of it
+requires an unproven Setup or Regime to be right — that is deliberate. The
+design's central rule is that unproven ideas get recorded, not gated on;
+only calculations that don't need statistical validation are allowed to
+block a trade. If a gate here ever depends on "is this Setup any good",
+it belongs in analytics, not in this module.
+
+PASS vs WAIT is a real distinction, not two names for "no": PASS is about
+the instrument (this name doesn't qualify on its own terms — bad R:R, too
+illiquid, too small to fill at the lot size). WAIT is about the portfolio
+(the name would be fine on its own, but the book has no room — heat, slot
+count, sector concentration). A WAITed plan can still fire later if the
+book frees up; a PASSed one should not resurface untouched.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
+from ..screening.scoring import MIN_TURNOVER
+
+LOT_SIZE = 100
+
+# Ordered so the first failing gate is the one reported: instrument-level
+# reasons take priority over portfolio-level ones, since "this name is bad"
+# is a more useful thing to tell the user than "no room right now" when both
+# happen to be true simultaneously.
+PASS_GATES = ("min_rr", "lot_size", "notional", "turnover", "liquidity")
+WAIT_GATES = ("heat", "max_positions", "sector_concentration")
+
+
+@dataclass(frozen=True)
+class PortfolioContext:
+    """What is already true about the book before this plan is considered.
+    Assembled by the caller from `positions` — this module has no DB access,
+    so the same verdict logic is exercised the same way in tests and prod."""
+
+    open_positions: int
+    current_heat: float  # fraction of capital already at risk
+    sector_position_counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class PlanLevels:
+    trigger_price: float
+    stop_planned: float
+    target_planned: float
+    sector33: Optional[str] = None
+    turnover_value: Optional[float] = None
+    avg_volume_20d: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class RiskVerdict:
+    decision: str  # BUY | WAIT | PASS
+    reason_code: str
+    shares: int
+    risk_amount: float
+    risk_pct: float
+    notional: float
+    rr: float
+    gates: dict[str, dict]
+
+
+def position_size(
+    capital: float, risk_per_trade: float, trigger: float, stop: float
+) -> tuple[int, float]:
+    """Shares sized off the stop distance, floored to the lot size.
+
+    Returns (shares, actual_risk_amount). Flooring to the lot only ever
+    reduces the risk below the target — it never rounds up past the cap —
+    so the caller can trust risk_amount is a ceiling, not an approximation
+    that might run hot.
+    """
+    risk_per_share = trigger - stop
+    if risk_per_share <= 0:
+        return 0, 0.0
+    target_risk = capital * risk_per_trade
+    raw_shares = target_risk / risk_per_share
+    shares = int(raw_shares // LOT_SIZE) * LOT_SIZE
+    return shares, shares * risk_per_share
+
+
+def evaluate(account: dict, levels: PlanLevels, ctx: PortfolioContext) -> RiskVerdict:
+    """account: a row from `accounts` (capital, risk_per_trade, max_positions,
+    max_heat, max_notional_pct, min_rr, max_sector_positions)."""
+    gates: dict[str, dict] = {}
+
+    risk_per_share = levels.trigger_price - levels.stop_planned
+    reward_per_share = levels.target_planned - levels.trigger_price
+    rr = reward_per_share / risk_per_share if risk_per_share > 0 else 0.0
+    gates["min_rr"] = {
+        "passed": rr >= account["min_rr"],
+        "value": round(rr, 3),
+        "threshold": account["min_rr"],
+    }
+
+    shares, risk_amount = position_size(
+        account["capital"], account["risk_per_trade"], levels.trigger_price, levels.stop_planned
+    )
+    gates["lot_size"] = {"passed": shares >= LOT_SIZE, "value": shares}
+
+    notional = shares * levels.trigger_price
+    max_notional = account["capital"] * account["max_notional_pct"]
+    gates["notional"] = {
+        "passed": notional <= max_notional,
+        "value": round(notional, 2),
+        "threshold": round(max_notional, 2),
+    }
+
+    risk_pct = risk_amount / account["capital"] if account["capital"] else 0.0
+    new_heat = ctx.current_heat + risk_pct
+    gates["heat"] = {
+        "passed": new_heat <= account["max_heat"],
+        "value": round(new_heat, 4),
+        "threshold": account["max_heat"],
+    }
+
+    gates["max_positions"] = {
+        "passed": ctx.open_positions < account["max_positions"],
+        "value": ctx.open_positions,
+        "threshold": account["max_positions"],
+    }
+
+    sector_count = (
+        ctx.sector_position_counts.get(levels.sector33, 0) if levels.sector33 else 0
+    )
+    gates["sector_concentration"] = {
+        "passed": sector_count < account["max_sector_positions"],
+        "value": sector_count,
+        "threshold": account["max_sector_positions"],
+    }
+
+    # Unknown turnover/volume doesn't block — matches the screen's own
+    # _passes_liquidity, which treats missing data as "not disqualifying"
+    # rather than as a failure. A stricter reading would double-penalize
+    # names the ingest pipeline just hasn't backfilled turnover for yet.
+    if levels.turnover_value is not None:
+        gates["turnover"] = {
+            "passed": levels.turnover_value >= MIN_TURNOVER,
+            "value": levels.turnover_value,
+            "threshold": MIN_TURNOVER,
+        }
+    else:
+        gates["turnover"] = {"passed": True, "value": None}
+
+    if levels.avg_volume_20d and shares:
+        adv_pct = shares / levels.avg_volume_20d
+        gates["liquidity"] = {"passed": adv_pct <= 0.01, "value": round(adv_pct, 4)}
+    else:
+        gates["liquidity"] = {"passed": True, "value": None}
+
+    for gate in PASS_GATES:
+        if not gates[gate]["passed"]:
+            return RiskVerdict("PASS", gate, shares, risk_amount, risk_pct, notional, rr, gates)
+    for gate in WAIT_GATES:
+        if not gates[gate]["passed"]:
+            return RiskVerdict("WAIT", gate, shares, risk_amount, risk_pct, notional, rr, gates)
+
+    return RiskVerdict(
+        "BUY", "all_gates_passed", shares, risk_amount, risk_pct, notional, rr, gates
+    )
