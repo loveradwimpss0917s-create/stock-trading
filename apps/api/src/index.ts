@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { selectFrom, type SupabaseEnv } from './db/supabase';
+import decisionOs from './routes/decision-os';
 
 type Bindings = SupabaseEnv & {
   ASSETS: Fetcher;
@@ -266,6 +267,8 @@ app.get('/api/outcomes', async (c) => {
   ]);
   return c.json({ outcomes, totals });
 });
+
+app.route('/api', decisionOs);
 
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
