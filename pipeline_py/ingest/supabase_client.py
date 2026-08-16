@@ -103,3 +103,26 @@ class SupabaseUpsertClient:
             )
             print(f"[supabase] first row sample: {rows[0]}", flush=True)
         resp.raise_for_status()
+
+    def update(self, table: str, params: dict[str, str], patch: dict[str, Any]) -> None:
+        """Partial update via PATCH — the correct PostgREST idiom for
+        touching only some columns of existing rows. `upsert`'s
+        INSERT ... ON CONFLICT still has Postgres validate NOT NULL columns
+        omitted from the payload before it ever checks for a conflict, so a
+        state-machine transition like {"state": "triggered"} would fail
+        there even though the row already exists and only needs one column
+        touched."""
+        resp = self.client.patch(
+            f"{self.url}/rest/v1/{table}",
+            params=params,
+            json=patch,
+            headers={
+                "apikey": self.service_role_key,
+                "Authorization": f"Bearer {self.service_role_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+        )
+        if resp.status_code >= 400:
+            print(f"[supabase] {resp.status_code} updating {table}: {resp.text[:500]}", flush=True)
+        resp.raise_for_status()

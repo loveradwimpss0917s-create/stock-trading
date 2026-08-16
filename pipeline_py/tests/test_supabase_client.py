@@ -60,3 +60,19 @@ def test_upsert_skips_request_when_rows_are_empty():
     client.close()
 
     assert route.call_count == 0
+
+
+@respx.mock
+def test_update_sends_a_patch_with_the_filter_and_only_the_changed_columns():
+    route = respx.patch("https://example.supabase.co/rest/v1/trade_plans").mock(
+        return_value=httpx.Response(204)
+    )
+    client = SupabaseUpsertClient(url="https://example.supabase.co", service_role_key="svc-key")
+    client.update("trade_plans", {"id": "eq.5"}, {"state": "triggered"})
+    client.close()
+
+    request = route.calls[0].request
+    assert dict(request.url.params)["id"] == "eq.5"
+    assert request.headers["Prefer"] == "return=minimal"
+    import json
+    assert json.loads(request.content) == {"state": "triggered"}

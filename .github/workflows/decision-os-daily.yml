@@ -1,0 +1,45 @@
+name: decision-os-daily
+on:
+  workflow_dispatch:
+  # Chained after the daily ingest+features, same pattern as
+  # screen-candidates.yml. Order: compute today's Regime snapshot first
+  # (informational, nothing downstream depends on it), then advance
+  # existing armed/draft plans against today's closes (trigger /
+  # invalidate / expire), then scan for new candidates — so a plan that
+  # triggers today doesn't also get evaluated as a fresh draft in the same
+  # run.
+  workflow_run:
+    workflows: ["ingest-daily"]
+    types: [completed]
+jobs:
+  decision-os:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r pipeline_py/requirements.txt
+      - name: Rebuild features
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m pipeline_py.features.build_features
+      - name: Compute Market Regime
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m pipeline_py.regime.compute --persist
+      - name: Advance trade plan state machine
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m pipeline_py.setups.advance --persist
+      - name: Scan for new candidate plans
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m pipeline_py.setups.scan --top-n-per-setup 10 --persist
