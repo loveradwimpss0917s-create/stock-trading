@@ -12,6 +12,7 @@ import {
   type SyncStatus,
 } from './api';
 import { CandidatesPanel } from './CandidatesPanel';
+import { OutcomeLedger } from './OutcomeLedger';
 import { PriceChart } from './PriceChart';
 import { StrategyPanel } from './StrategyPanel';
 import { ThemePerformancePanel } from './ThemePerformancePanel';
@@ -136,7 +137,12 @@ export default function App() {
       </nav>
 
       {tab === 'candidates' && <CandidatesPanel />}
-      {tab === 'results' && <ThemePerformancePanel />}
+      {tab === 'results' && (
+        <>
+          <OutcomeLedger />
+          <ThemePerformancePanel />
+        </>
+      )}
 
       {tab === 'research' && (
         <>

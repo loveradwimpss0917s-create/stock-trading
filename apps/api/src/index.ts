@@ -242,6 +242,31 @@ app.get('/api/theme-performance', async (c) => {
   return c.json({ performance: rows, baseline });
 });
 
+/** Individual candidates and what each one did — the trade-by-trade ledger
+ * behind the theme aggregates. Newest first, since the recent sessions are
+ * the ones a reader recognises from the candidates tab. */
+app.get('/api/outcomes', async (c) => {
+  const horizon = c.req.query('horizon');
+  const theme = c.req.query('theme');
+  const asOf = c.req.query('as_of');
+  const limit = Math.min(Number(c.req.query('limit') ?? 200), 1000);
+
+  const query: Record<string, string> = {
+    select: '*',
+    order: 'as_of.desc,theme_sort_order.asc,rank.asc',
+    limit: String(limit),
+  };
+  if (horizon) query.horizon = `eq.${horizon}`;
+  if (theme) query.theme_key = `eq.${theme}`;
+  if (asOf) query.as_of = `eq.${asOf}`;
+
+  const [outcomes, totals] = await Promise.all([
+    selectFrom<Record<string, unknown>>(c.env, 'candidate_outcomes_view', query),
+    selectFrom<Record<string, unknown>>(c.env, 'candidate_outcomes_totals', { select: '*' }),
+  ]);
+  return c.json({ outcomes, totals });
+});
+
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default app;

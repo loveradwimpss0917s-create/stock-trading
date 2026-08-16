@@ -125,6 +125,52 @@ export interface Baseline {
 export const fetchThemePerformance = () =>
   get<{ performance: ThemePerformance[]; baseline: Baseline[] }>('/api/theme-performance');
 
+export interface Outcome {
+  as_of: string;
+  theme_key: string;
+  theme_name: string;
+  horizon: string;
+  rank: number;
+  code: string;
+  ticker4: string;
+  name_ja: string | null;
+  entry_fill: number | null;
+  stop_price: number | null;
+  target_price: number | null;
+  exit_price: number | null;
+  exit_date: string | null;
+  bars_held: number | null;
+  outcome: 'target' | 'stop' | 'timeout' | 'no_entry';
+  r_multiple: number | null;
+  pnl_per_share: number | null;
+}
+
+export interface OutcomeTotals {
+  horizon: string;
+  n_trades: number;
+  n_no_entry: number;
+  n_wins: number;
+  total_r: number | null;
+  avg_r: number | null;
+  avg_bars_held: number | null;
+  first_as_of: string | null;
+  last_as_of: string | null;
+}
+
+export const fetchOutcomes = (params: {
+  horizon?: string;
+  theme?: string;
+  as_of?: string;
+  limit?: number;
+}) => {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v) qs.set(k, String(v));
+  const s = qs.toString();
+  return get<{ outcomes: Outcome[]; totals: OutcomeTotals[] }>(
+    s ? `/api/outcomes?${s}` : '/api/outcomes'
+  );
+};
+
 export const fetchThemes = () => get<{ themes: Theme[] }>('/api/themes');
 
 export const fetchCandidates = (theme?: string, horizon?: string) => {
