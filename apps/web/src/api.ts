@@ -36,6 +36,19 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function send<T>(method: 'POST' | 'PATCH', path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return (await res.json()) as T;
+}
+
+const post = <T>(path: string, body?: unknown) => send<T>('POST', path, body);
+const patch = <T>(path: string, body?: unknown) => send<T>('PATCH', path, body);
+
 export interface StrategyResult {
   run_id: number;
   strategy: string;
@@ -199,3 +212,178 @@ export const fetchStocks = (q?: string) =>
   get<{ stocks: Security[] }>(q ? `/api/stocks?q=${encodeURIComponent(q)}` : '/api/stocks');
 export const fetchStock = (code: string) =>
   get<{ security: Security; quotes: DailyQuote[] }>(`/api/stocks/${code}`);
+
+// ---------------------------------------------------------------------
+// Decision OS
+export interface Setup {
+  key: string;
+  name_ja: string;
+  horizon: 'day' | 'swing';
+  hypothesis: string;
+  time_stop_bars: number;
+  expiry_bars: number;
+  min_rr: number;
+}
+
+export interface RegimeSnapshot {
+  date: string;
+  pct_above_ma25: number;
+  pct_above_ma75: number;
+  adv_decline_ratio: number;
+  new_high_minus_low: number;
+  dispersion: number;
+  regime_label: 'offense' | 'neutral' | 'defense';
+  computed_from_n: number;
+}
+
+export type PlanState =
+  | 'draft'
+  | 'armed'
+  | 'triggered'
+  | 'open'
+  | 'closed'
+  | 'expired'
+  | 'invalidated'
+  | 'passed'
+  | 'discarded';
+
+export interface TradePlan {
+  id: number;
+  account_id: number;
+  code: string;
+  setup_key: string;
+  setup_name: string;
+  setup_horizon: 'day' | 'swing';
+  setup_hypothesis: string;
+  ticker4: string;
+  security_name: string | null;
+  sector33: string | null;
+  state: PlanState;
+  created_on: string;
+  reference_close: string;
+  trigger_price: string;
+  stop_planned: string;
+  target_planned: string;
+  invalidation: { type: string; level: number; source_ref?: string };
+  expires_on: string;
+  thesis: string | null;
+  anti_thesis: string | null;
+  expected_rr: string;
+  shares_planned: number | null;
+  risk_amount: string | null;
+  risk_pct: string | null;
+  scenarios: { bull?: string; base?: string; bear?: string } | null;
+  current_price: string | null;
+  triggered_on: string | null;
+  triggered_price: string | null;
+}
+
+export interface GateResult {
+  passed: boolean;
+  value: number | null;
+  threshold?: number;
+}
+
+export interface RiskVerdict {
+  decision: 'BUY' | 'WAIT' | 'PASS';
+  reasonCode: string;
+  shares: number;
+  riskAmount: number;
+  riskPct: number;
+  notional: number;
+  rr: number;
+  gates: Record<string, GateResult>;
+}
+
+export interface Position {
+  id: number;
+  plan_id: number;
+  account_id: number;
+  code: string;
+  ticker4: string;
+  security_name: string | null;
+  sector33: string | null;
+  opened_on: string;
+  entry_price: string;
+  shares: number;
+  stop_current: string;
+  target_current: string;
+  time_stop_on: string;
+  status: 'open' | 'closed';
+  closed_on: string | null;
+  exit_price: string | null;
+  exit_reason: string | null;
+  pnl_yen: string | null;
+  r_multiple: string | null;
+  current_price: string | null;
+  current_risk: string | null;
+  current_r: string | null;
+}
+
+export interface HomeAction {
+  kind: string;
+  message: string;
+  ref_id: number;
+}
+
+export interface HomeResponse {
+  account: { id: number; capital: string; max_heat: string };
+  actions: HomeAction[];
+  open_positions: Position[];
+  portfolio_heat: number;
+  max_heat: number;
+  armed_watching: TradePlan[];
+  triggered_awaiting_entry: TradePlan[];
+  regime: RegimeSnapshot | null;
+  new_candidates: TradePlan[];
+}
+
+export const fetchHome = () => get<HomeResponse>('/api/home');
+export const fetchSetups = () => get<{ setups: Setup[] }>('/api/setups');
+export const fetchRegime = () => get<RegimeSnapshot | null>('/api/regime');
+export const fetchPlans = (state?: string) =>
+  get<{ plans: TradePlan[] }>(state ? `/api/plans?state=${state}` : '/api/plans');
+export const fetchPlan = (id: number) => get<TradePlan>(`/api/plans/${id}`);
+export const fetchPlanRisk = (id: number) => get<RiskVerdict>(`/api/plans/${id}/risk`);
+export const updatePlan = (
+  id: number,
+  body: { thesis?: string; anti_thesis?: string; scenarios?: unknown }
+) => patch<TradePlan>(`/api/plans/${id}`, body);
+export const decidePlan = (
+  id: number,
+  body: { decision: 'BUY' | 'WAIT' | 'PASS'; reason_code: string; reason_note?: string }
+) => post<{ plan: TradePlan; verdict: RiskVerdict }>(`/api/plans/${id}/decide`, body);
+
+export const fetchPositions = (status?: string) =>
+  get<{ positions: Position[] }>(status ? `/api/positions?status=${status}` : '/api/positions');
+export const createPosition = (body: {
+  plan_id: number;
+  opened_on: string;
+  entry_price: number;
+  shares: number;
+}) => post<{ position: Position }>('/api/positions', body);
+export const addPositionEvent = (
+  id: number,
+  body: {
+    occurred_on: string;
+    event_type: string;
+    price?: number;
+    note?: string;
+    thesis_status?: string;
+    new_stop?: number;
+    new_target?: number;
+  }
+) => post(`/api/positions/${id}/events`, body);
+export const closePosition = (
+  id: number,
+  body: {
+    closed_on: string;
+    exit_price: number;
+    exit_reason: string;
+    thesis_was_correct: boolean;
+    execution_adherence: string;
+    review_note?: string;
+  }
+) => post(`/api/positions/${id}/close`, body);
+
+export const fetchJournal = () => get<{ journal: (Position & { journal: unknown })[] }>('/api/journal');

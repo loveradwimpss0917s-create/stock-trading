@@ -12,12 +12,16 @@ import {
   type SyncStatus,
 } from './api';
 import { CandidatesPanel } from './CandidatesPanel';
+import { HomePanel } from './HomePanel';
+import { JournalPanel } from './JournalPanel';
 import { OutcomeLedger } from './OutcomeLedger';
+import { PlansPanel } from './PlansPanel';
+import { PositionsPanel } from './PositionsPanel';
 import { PriceChart } from './PriceChart';
 import { StrategyPanel } from './StrategyPanel';
 import { ThemePerformancePanel } from './ThemePerformancePanel';
 
-type Tab = 'candidates' | 'results' | 'research';
+type Tab = 'home' | 'plans' | 'positions' | 'journal' | 'candidates' | 'results' | 'research';
 
 function pctChange(quotes: DailyQuote[]): number | null {
   const closes = quotes.map((q) => (q.close === null ? NaN : Number(q.close))).filter((v) => !Number.isNaN(v));
@@ -38,7 +42,7 @@ export default function App() {
   const [strategies, setStrategies] = useState<StrategyResult[]>([]);
   const [passedCount, setPassedCount] = useState(0);
   const [freshness, setFreshness] = useState<Freshness | null>(null);
-  const [tab, setTab] = useState<Tab>('candidates');
+  const [tab, setTab] = useState<Tab>('home');
 
   useEffect(() => {
     fetchSyncStatus().then(setStatus).catch((e) => setError(String(e)));
@@ -110,32 +114,33 @@ export default function App() {
       {error && <p className="status-error">エラー: {error}</p>}
 
       <nav className="tabs" role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === 'candidates'}
-          className={`tab${tab === 'candidates' ? ' is-active' : ''}`}
-          onClick={() => setTab('candidates')}
-        >
-          売買候補
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === 'results'}
-          className={`tab${tab === 'results' ? ' is-active' : ''}`}
-          onClick={() => setTab('results')}
-        >
-          結果
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === 'research'}
-          className={`tab${tab === 'research' ? ' is-active' : ''}`}
-          onClick={() => setTab('research')}
-        >
-          検証・株価
-        </button>
+        {(
+          [
+            ['home', '今日'],
+            ['plans', '計画'],
+            ['positions', '建玉'],
+            ['journal', 'ジャーナル'],
+            ['candidates', 'テーマ別候補'],
+            ['results', '結果'],
+            ['research', '検証・株価'],
+          ] as [Tab, string][]
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            role="tab"
+            aria-selected={tab === value}
+            className={`tab${tab === value ? ' is-active' : ''}`}
+            onClick={() => setTab(value)}
+          >
+            {label}
+          </button>
+        ))}
       </nav>
 
+      {tab === 'home' && <HomePanel />}
+      {tab === 'plans' && <PlansPanel />}
+      {tab === 'positions' && <PositionsPanel />}
+      {tab === 'journal' && <JournalPanel />}
       {tab === 'candidates' && <CandidatesPanel />}
       {tab === 'results' && (
         <>
