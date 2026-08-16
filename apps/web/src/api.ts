@@ -387,3 +387,45 @@ export const closePosition = (
 ) => post(`/api/positions/${id}/close`, body);
 
 export const fetchJournal = () => get<{ journal: (Position & { journal: unknown })[] }>('/api/journal');
+
+// ---------------------------------------------------------------------
+// Replay training
+export interface ReplayCandidate {
+  as_of: string;
+  setup_key: string;
+  code: string;
+  trigger_price: string;
+  stop_planned: string;
+  target_planned: string;
+  ticker4: string;
+  security_name: string | null;
+  setup_name: string;
+  setup_hypothesis: string;
+}
+
+export interface ReplayOutcome {
+  entry_fill: string | null;
+  exit_price: string | null;
+  outcome: 'target' | 'stop' | 'timeout' | 'no_entry';
+  r_multiple: string | null;
+  bars_held: number | null;
+}
+
+export interface ReplayResult {
+  code: string;
+  setup_key: string;
+  decision: 'BUY' | 'WAIT' | 'PASS';
+  reason_code: string;
+  outcome: (ReplayOutcome & ReplayCandidate) | null;
+}
+
+export const startReplay = () =>
+  post<{ session_id: number; as_of: string; candidates: ReplayCandidate[] }>('/api/replay/start');
+
+export const decideReplay = (
+  sessionId: number,
+  body: { code: string; setup_key: string; decision: 'BUY' | 'WAIT' | 'PASS'; reason_code: string }
+) => post<{ decisions: unknown[] }>(`/api/replay/${sessionId}/decide`, body);
+
+export const revealReplay = (sessionId: number) =>
+  post<{ as_of: string; results: ReplayResult[] }>(`/api/replay/${sessionId}/reveal`);

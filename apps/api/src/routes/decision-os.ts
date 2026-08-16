@@ -520,6 +520,130 @@ app.get('/home', async (c) => {
   });
 });
 
+// ---------------------------------------------------------------------
+// Replay training: turns the Free plan's 84-day lag into practice reps.
+// A live account trades ~250 times a year; at the per-trade R spread this
+// screen already measures (stdev 1.2-1.9 in the theme system), detecting a
+// real edge needs on the order of 1,800 trades — about 7 years. Replay
+// pulls a past session's Setup candidates from setup_outcomes (built by
+// pipeline_py/setups/replay.py) WITHOUT their outcome fields, lets the user
+// decide blind, then reveals what actually happened. It does not turn a
+// short replay history into statistical proof of anything — see PART 11's
+// same caution against reading `theme_edge`-style numbers off a handful of
+// sessions.
+
+interface SetupOutcomeRow {
+  as_of: string;
+  setup_key: string;
+  code: string;
+  trigger_price: string;
+  stop_planned: string;
+  target_planned: string;
+  entry_fill: string | null;
+  exit_price: string | null;
+  exit_date: string | null;
+  bars_held: number | null;
+  outcome: string;
+  r_multiple: string | null;
+  ticker4: string;
+  security_name: string | null;
+  setup_name: string;
+  setup_hypothesis: string;
+}
+
+interface ReplayDecision {
+  code: string;
+  setup_key: string;
+  decision: Decision;
+  reason_code: string;
+}
+
+app.post('/replay/start', async (c) => {
+  // Pick from sessions that actually have judged outcomes, uniformly at
+  // random client-side (PostgREST has no simple "random row" primitive
+  // without a stored proc, and the candidate set is small enough this is
+  // cheap).
+  const allDates = await selectFrom<{ as_of: string }>(c.env, 'setup_outcomes', {
+    select: 'as_of',
+  });
+  const distinctDates = [...new Set(allDates.map((d) => d.as_of))];
+  if (distinctDates.length === 0) {
+    return c.json({ error: 'no replay data yet — run pipeline_py.setups.replay first' }, 404);
+  }
+  const asOf = distinctDates[Math.floor(Math.random() * distinctDates.length)];
+
+  const rows = await selectFrom<SetupOutcomeRow>(c.env, 'setup_outcomes_view', {
+    select: 'as_of,setup_key,code,trigger_price,stop_planned,target_planned,ticker4,security_name,setup_name,setup_hypothesis',
+    as_of: `eq.${asOf}`,
+    order: 'setup_key.asc,code.asc',
+  });
+
+  const accountRow = await loadAccount(c.env);
+  const created = await insertInto<{ id: number }>(c.env, 'replay_sessions', [
+    { account_id: accountRow.id, as_of: asOf, revealed: false, decisions: [] },
+  ]);
+
+  // outcome fields deliberately stripped before returning — this is the
+  // "blind" part of blind replay.
+  const blind = rows.map(({ entry_fill, exit_price, exit_date, bars_held, outcome, r_multiple, ...rest }) => rest);
+
+  return c.json({ session_id: created[0]!.id, as_of: asOf, candidates: blind });
+});
+
+app.post('/replay/:id/decide', async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json<ReplayDecision>();
+  if (!['BUY', 'WAIT', 'PASS'].includes(body.decision)) {
+    return c.json({ error: 'decision must be BUY/WAIT/PASS' }, 400);
+  }
+
+  const rows = await selectFrom<{ id: number; decisions: ReplayDecision[]; revealed: boolean }>(
+    c.env,
+    'replay_sessions',
+    { select: '*', id: `eq.${id}` }
+  );
+  const session = rows[0];
+  if (!session) return c.json({ error: 'not found' }, 404);
+  if (session.revealed) return c.json({ error: 'session already revealed' }, 409);
+
+  const decisions = session.decisions.filter(
+    (d) => !(d.code === body.code && d.setup_key === body.setup_key)
+  );
+  decisions.push(body);
+
+  const updated = await updateWhere(c.env, 'replay_sessions', { id: `eq.${id}` }, { decisions });
+  return c.json({ decisions: (updated[0] as { decisions: ReplayDecision[] } | undefined)?.decisions ?? decisions });
+});
+
+app.post('/replay/:id/reveal', async (c) => {
+  const id = c.req.param('id');
+  const rows = await selectFrom<{ id: number; as_of: string; decisions: ReplayDecision[] }>(
+    c.env,
+    'replay_sessions',
+    { select: '*', id: `eq.${id}` }
+  );
+  const session = rows[0];
+  if (!session) return c.json({ error: 'not found' }, 404);
+
+  const outcomes = await selectFrom<SetupOutcomeRow>(c.env, 'setup_outcomes_view', {
+    select: '*',
+    as_of: `eq.${session.as_of}`,
+  });
+  const byKey = new Map(outcomes.map((o) => [`${o.code}/${o.setup_key}`, o]));
+
+  const results = session.decisions.map((d) => ({
+    ...d,
+    outcome: byKey.get(`${d.code}/${d.setup_key}`) ?? null,
+  }));
+
+  await updateWhere(c.env, 'replay_sessions', { id: `eq.${id}` }, {
+    revealed: true,
+    revealed_at: new Date().toISOString(),
+  });
+
+  return c.json({ as_of: session.as_of, results });
+});
+
 function addTradingDays(start: string, n: number): string {
   const d = new Date(`${start}T00:00:00Z`);
   let remaining = n;
