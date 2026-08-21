@@ -14,7 +14,7 @@
  * turnover, liquidity. None of it depends on a Setup or Regime being
  * statistically valid; unproven ideas get recorded, not gated on.
  */
-import { planEconomics, type PlanEconomics } from './cost';
+import { planEconomics, type PlanEconomics } from '@kabu-quant/core';
 
 export const LOT_SIZE = 100;
 export const MIN_TURNOVER = 300_000_000; // matches pipeline_py/screening/scoring.py

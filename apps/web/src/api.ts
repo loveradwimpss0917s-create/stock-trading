@@ -531,3 +531,21 @@ export interface DisciplineSummary {
 
 export const fetchDiscipline = () =>
   get<{ summary: DisciplineSummary | null; positions: PositionBehaviour[] }>('/api/discipline');
+
+/** A trade the user is taking themselves, entered by hand. Levels are
+ * required — a trade without a stop written down before entry has no R,
+ * and without an R nothing else in this app can say anything about it. */
+export interface NewPlanInput {
+  code: string;
+  trigger_price: number;
+  stop_planned: number;
+  target_planned: number;
+  thesis: string;
+  anti_thesis?: string;
+  atr?: number | null;
+  time_stop_bars?: number;
+  expires_on?: string;
+}
+
+export const createPlan = (body: NewPlanInput) =>
+  post<{ plan: TradePlan }>('/api/plans', body);

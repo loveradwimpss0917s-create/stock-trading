@@ -10,7 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "hono": "^4.6.0"
+    "hono": "^4.6.0",
+    "@kabu-quant/core": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260801.1",

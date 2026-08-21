@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fetchPlans, type TradePlan } from './api';
+import { NewPlanForm } from './NewPlanForm';
 import { PlanDetailModal } from './PlanDetailModal';
 
 const STATE_TABS: { value: string; label: string }[] = [
@@ -45,6 +46,8 @@ export function PlansPanel() {
 
   return (
     <section className="panel">
+      <NewPlanForm onCreated={load} />
+
       <div className="panel-head">
         <h2>計画一覧</h2>
         <div className="seg">

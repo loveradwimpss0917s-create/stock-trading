@@ -3,6 +3,13 @@
  * pipeline_py/risk/cost_in_r.py. Keep the two in lockstep; the Python side
  * carries the reference test suite.
  *
+ * Lives in packages/core rather than in either app because both need it:
+ * the Worker gates on it at decision time, and the browser recomputes it
+ * live while the user is still typing the levels of a trade they have not
+ * committed to. A third copy of this particular arithmetic is exactly the
+ * kind of drift that would let the two disagree about whether a trade is
+ * worth taking.
+ *
  * Yen costs mean nothing on their own: the same 30-yen spread is trivial on
  * a trade risking 500 yen a share and fatal on one risking 40. Measured in
  * the trade's own risk unit it carries a consequence most retail screens

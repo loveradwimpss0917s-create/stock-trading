@@ -38,6 +38,7 @@ interface PlanRow {
   setup_horizon?: string;
   setup_hypothesis?: string;
   setup_stop_rule?: { type: string; mult: number } | null;
+  atr?: string | number | null;
   ticker4?: string;
   security_name?: string;
   sector33?: string | null;
@@ -131,6 +132,7 @@ async function loadPortfolioContext(env: SupabaseEnv, accountId: number): Promis
  * flat floor applies and cost comes out optimistically low on exactly the
  * volatile names where it is worst. */
 function impliedAtr(plan: PlanRow): number | null {
+  if (plan.atr != null) return Number(plan.atr);
   const rule = plan.setup_stop_rule;
   if (rule?.type !== 'atr_mult' || !rule.mult) return null;
   const risk = Number(plan.trigger_price) - Number(plan.stop_planned);
@@ -226,6 +228,95 @@ app.get('/plans', async (c) => {
   if (state) query.state = `in.(${state})`;
   const plans = await selectFrom<PlanRow>(c.env, 'trade_plans_view', query);
   return c.json({ plans });
+});
+
+/**
+ * Create a plan by hand.
+ *
+ * Until this existed, kabu could only hold trades its own batch drafted
+ * from 84-day-old data — which is to say, no trade the user actually took.
+ * The Risk Engine never sized a real position and the discipline record
+ * had nothing to record. For an app whose remaining value is risk and
+ * discipline rather than stock selection, that was not a missing feature
+ * but a missing premise.
+ *
+ * Levels are required and rejected if inconsistent. That is not
+ * bureaucracy: a trade without a stop written down before entry has no R,
+ * and without an R nothing else in this app can say anything about it.
+ * The thesis is required for the same reason a reason_code is — a trade
+ * whose rationale was never written cannot be reviewed afterwards, only
+ * rationalised.
+ */
+app.post('/plans', async (c) => {
+  const body = await c.req.json<{
+    code: string;
+    trigger_price: number;
+    stop_planned: number;
+    target_planned: number;
+    thesis: string;
+    anti_thesis?: string;
+    atr?: number | null;
+    reference_close?: number | null;
+    time_stop_bars?: number;
+    expires_on?: string;
+    invalidation_note?: string;
+    account_id?: number;
+  }>();
+
+  const code = String(body.code ?? '').trim();
+  const trigger = Number(body.trigger_price);
+  const stop = Number(body.stop_planned);
+  const target = Number(body.target_planned);
+
+  if (!code) return c.json({ error: 'code is required' }, 400);
+  if (!Number.isFinite(trigger) || !Number.isFinite(stop) || !Number.isFinite(target)) {
+    return c.json({ error: 'trigger_price, stop_planned and target_planned are required' }, 400);
+  }
+  if (stop >= trigger) {
+    return c.json({ error: 'ストップはエントリーより下でなければ、リスクが定義できません。' }, 400);
+  }
+  if (target <= trigger) {
+    return c.json({ error: '目標はエントリーより上でなければ、リワードが定義できません。' }, 400);
+  }
+  if (!body.thesis?.trim()) {
+    return c.json({ error: '根拠の記入は必須です。後から検証できない記録は残す意味がありません。' }, 400);
+  }
+
+  const securities = await selectFrom<{ code: string }>(c.env, 'securities', {
+    select: 'code',
+    code: `eq.${code}`,
+  });
+  if (!securities[0]) return c.json({ error: `未知の銘柄コードです: ${code}` }, 400);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const riskPerShare = trigger - stop;
+  const created = await insertInto<PlanRow>(c.env, 'trade_plans', [
+    {
+      account_id: body.account_id ?? 1,
+      code,
+      setup_key: 'manual',
+      created_on: today,
+      state: 'armed', // already decided to watch it; there is no scan to arm it
+      reference_close: body.reference_close ?? trigger,
+      trigger_price: trigger,
+      trigger_condition: { type: 'manual', note: '手入力' },
+      stop_planned: stop,
+      target_planned: target,
+      atr: body.atr ?? null,
+      time_stop_bars: body.time_stop_bars ?? 10,
+      expires_on: body.expires_on ?? today,
+      invalidation: {
+        type: 'manual',
+        level: stop,
+        note: body.invalidation_note ?? '手入力（ストップ到達を反証とする）',
+      },
+      thesis: body.thesis.trim(),
+      anti_thesis: body.anti_thesis?.trim() || null,
+      expected_rr: Number(((target - trigger) / riskPerShare).toFixed(3)),
+    },
+  ]);
+
+  return c.json({ plan: created[0] }, 201);
 });
 
 app.get('/plans/:id', async (c) => {

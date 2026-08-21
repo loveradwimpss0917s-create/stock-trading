@@ -98,8 +98,11 @@ export default function App() {
 
   return (
     <main className="page">
+      {/* 銘柄選択に価値が見つからなかったことを隠さない。隠すと、この
+          アプリで唯一正しく動いている部分（リスク・規律・訓練）まで
+          「当たる銘柄を出す道具」として使われてしまう。 */}
       <div className="banner">
-        <strong>売買には使えません。</strong>{' '}
+        <strong>このアプリは「買う銘柄」を当てません。</strong>{' '}
         {freshness?.days_behind != null ? (
           <>
             最新データは <span className="tabular">{freshness.latest_date}</span>（
@@ -107,14 +110,17 @@ export default function App() {
             ）。J-Quants Freeは12週間遅延のため、常にこの状態です。
           </>
         ) : (
-          <>12週間遅延データに基づく研究結果であり、売買推奨ではありません。</>
+          <>12週間遅延データに基づくため、そのまま売買には使えません。</>
         )}{' '}
-        本アプリの用途は「その戦略は統計的に本物か」の検証です。
+        検証した3つのSetupは、対照群とコストを差し引くといずれも優位性が確認できませんでした
+        （「結果」タブに実測値）。
+        <strong>今日から正しく動くのは、ポジションサイズ・計画の遵守・リプレイ訓練の3つ</strong>
+        です。ここには予測が一切含まれず、優位性の有無と無関係に正しいためです。
       </div>
 
       <header className="header">
-        <h1>kabu-quant</h1>
-        <p className="subtitle">日本株クオンツ分析 — 研究基盤</p>
+        <h1>kabu</h1>
+        <p className="subtitle">意思決定と規律の記録 — 日本株</p>
       </header>
 
       {error && <p className="status-error">エラー: {error}</p>}
