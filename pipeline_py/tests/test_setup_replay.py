@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 from pipeline_py.screening.evaluate import Bar
-from pipeline_py.setups.replay import replay
+from pipeline_py.setups.replay import baseline, replay, walk_plan
 
 BREAKOUT = {
     "key": "breakout_20d",
@@ -26,9 +26,77 @@ def weekday_dates(n, start="2026-01-05"):
     return out
 
 
-def make_bars(code, closes):
+def bars_from(closes, opens=None, highs=None, lows=None):
     dates = weekday_dates(len(closes))
-    return [Bar(dt, c, c + 1, c - 1, c) for dt, c in zip(dates, closes)]
+    return [
+        Bar(
+            dt,
+            opens[i] if opens else closes[i],
+            highs[i] if highs else closes[i] + 1,
+            lows[i] if lows else closes[i] - 1,
+            closes[i],
+        )
+        for i, dt in enumerate(dates)
+    ]
+
+
+class TestWalkPlanWaitsForTheTrigger:
+    """The bug this replaces bought unconditionally on as_of+1 while still
+    measuring risk from trigger_price — a price that was never paid. These
+    pin the corrected behaviour against that regression."""
+
+    def test_no_fill_while_price_stays_below_the_trigger(self):
+        # Drifts up but never reaches 120 within the 5-session window.
+        bars = bars_from([100, 101, 102, 103, 104, 105])
+        out = walk_plan(bars, 0, trigger_price=120, invalidation_level=90,
+                        stop=110, target=140, expiry_bars=5, time_stop_bars=10)
+        assert out["outcome"] == "expired"
+        assert out.get("entry_fill") is None
+
+    def test_the_fill_is_the_session_after_the_trigger_not_the_trigger_itself(self):
+        # Trigger fires on index 2 (close 120); the fill must be index 3's open.
+        bars = bars_from(
+            [100, 105, 120, 125, 130, 135],
+            opens=[100, 104, 118, 123, 128, 133],
+        )
+        out = walk_plan(bars, 0, trigger_price=120, invalidation_level=90,
+                        stop=110, target=140, expiry_bars=5, time_stop_bars=10)
+        assert out["triggered_on"] == bars[2].date
+        assert out["entry_fill"] == 123  # bars[3].open
+
+    def test_a_trigger_on_the_last_watched_session_still_needs_a_fill_session(self):
+        # Triggers exactly at the expiry boundary but no bar remains to buy on.
+        bars = bars_from([100, 101, 102, 103, 104, 120])
+        out = walk_plan(bars, 0, trigger_price=120, invalidation_level=90,
+                        stop=110, target=140, expiry_bars=5, time_stop_bars=10)
+        assert out is None  # unjudgeable, not a timeout
+
+    def test_invalidation_before_the_trigger_ends_the_plan_unfilled(self):
+        bars = bars_from([100, 85, 130, 140, 150, 160])
+        out = walk_plan(bars, 0, trigger_price=120, invalidation_level=90,
+                        stop=110, target=140, expiry_bars=5, time_stop_bars=10)
+        assert out["outcome"] == "invalidated"
+        assert out.get("entry_fill") is None
+
+    def test_a_window_running_past_the_data_is_unjudgeable(self):
+        bars = bars_from([100, 101, 102])  # only 2 sessions of a 5-session window
+        out = walk_plan(bars, 0, trigger_price=120, invalidation_level=90,
+                        stop=110, target=140, expiry_bars=5, time_stop_bars=10)
+        assert out is None
+
+    def test_r_is_measured_from_the_actual_fill(self):
+        # Fill at 123, stop 110 -> risk 13. Target 140 reached on a later bar.
+        bars = bars_from(
+            [100, 105, 120, 125, 145, 150],
+            opens=[100, 104, 118, 123, 141, 148],
+            highs=[101, 106, 121, 126, 146, 151],
+        )
+        out = walk_plan(bars, 0, trigger_price=120, invalidation_level=90,
+                        stop=110, target=140, expiry_bars=5, time_stop_bars=10)
+        assert out["outcome"] == "target"
+        assert out["entry_fill"] == 123
+        # exit 141 (gapped past the 140 target, so filled at the open)
+        assert abs(out["r_multiple"] - (141 - 123) / (123 - 110)) < 1e-9
 
 
 def feat_row(**kw):
@@ -38,77 +106,145 @@ def feat_row(**kw):
 
 
 class TestReplay:
-    def test_a_qualifying_session_produces_one_outcome_row(self):
+    def test_a_qualifying_session_produces_one_row(self):
         code = "72030"
-        closes = [1000 + i * 5 for i in range(30)]  # steady rise
-        bars = {code: make_bars(code, closes)}
+        closes = [1000 + i * 5 for i in range(40)]
+        bars = {code: bars_from(closes)}
         as_of = bars[code][24].date
-        features_by_date = {as_of: {code: feat_row(ma_25=closes[23] - 5)}}
-        securities = {code: {"code": code}}
-        turnover = {(code, as_of): 5_000_000_000}
-
-        rows = replay(features_by_date, bars, securities, [BREAKOUT], [as_of], turnover)
+        rows = replay(
+            {as_of: {code: feat_row(ma_25=closes[23] - 5)}},
+            bars,
+            {code: {"code": code}},
+            [BREAKOUT],
+            [as_of],
+            {(code, as_of): 5_000_000_000},
+        )
         assert len(rows) == 1
-        r = rows[0]
-        assert r["code"] == code
-        assert r["setup_key"] == "breakout_20d"
-        assert r["as_of"] == as_of
-        assert r["outcome"] in {"target", "stop", "timeout", "no_entry"}
+        assert rows[0]["setup_key"] == "breakout_20d"
 
     def test_a_code_missing_from_securities_is_excluded(self):
         code = "72030"
-        closes = [1000 + i * 5 for i in range(30)]
-        bars = {code: make_bars(code, closes)}
+        closes = [1000 + i * 5 for i in range(40)]
+        bars = {code: bars_from(closes)}
         as_of = bars[code][24].date
-        features_by_date = {as_of: {code: feat_row()}}
-        turnover = {(code, as_of): 5_000_000_000}
-
-        rows = replay(features_by_date, bars, {}, [BREAKOUT], [as_of], turnover)
+        rows = replay(
+            {as_of: {code: feat_row()}}, bars, {}, [BREAKOUT], [as_of],
+            {(code, as_of): 5_000_000_000},
+        )
         assert rows == []
 
-    def test_the_session_immediately_after_as_of_is_the_entry(self):
-        # Deterministic target hit: after the draft session, price gaps
-        # straight to the target on the very next bar. A slight upward
-        # drift keeps low_10 strictly below high_20/trigger — a perfectly
-        # flat series makes invalidation == trigger, which resolve_plan_levels
-        # correctly refuses to resolve.
+    def test_a_code_failing_the_candidate_rule_is_excluded(self):
         code = "72030"
-        closes = [1000.0 + i * 0.5 for i in range(25)]
-        bars_list = make_bars(code, closes)
-        as_of = bars_list[24].date
-        # Append one more session that gaps to a clear target hit.
-        next_date = weekday_dates(1, start=(date.fromisoformat(as_of) + timedelta(days=3)).isoformat())[0]
-        bars_list.append(Bar(next_date, 1200.0, 1210.0, 1195.0, 1205.0))
-        bars = {code: bars_list}
-        features_by_date = {as_of: {code: feat_row(ma_25=990.0, atr_14=10.0)}}
-        securities = {code: {"code": code}}
-        turnover = {(code, as_of): 5_000_000_000}
+        closes = [1000.0] * 40
+        bars = {code: bars_from(closes)}
+        as_of = bars[code][24].date
+        rows = replay(
+            {as_of: {code: feat_row(ma_25=2000.0)}},  # close never above ma_25
+            bars,
+            {code: {"code": code}},
+            [BREAKOUT],
+            [as_of],
+            {(code, as_of): 5_000_000_000},
+        )
+        assert rows == []
 
-        rows = replay(features_by_date, bars, securities, [BREAKOUT], [as_of], turnover)
+    def test_unfilled_plans_are_recorded_rather_than_dropped(self):
+        # How often a Setup fails to trigger is part of its cost; dropping
+        # those rows would make the survivors look better than the Setup is.
+        code = "72030"
+        closes = [1000 + i * 5 for i in range(24)] + [900.0] * 16  # collapses after as_of
+        bars = {code: bars_from(closes)}
+        as_of = bars[code][23].date
+        rows = replay(
+            {as_of: {code: feat_row(ma_25=closes[22] - 5)}},
+            bars,
+            {code: {"code": code}},
+            [BREAKOUT],
+            [as_of],
+            {(code, as_of): 5_000_000_000},
+        )
         assert len(rows) == 1
-        assert rows[0]["outcome"] == "target"
-        assert rows[0]["entry_fill"] == 1200.0  # the next session's open
+        assert rows[0]["outcome"] in {"invalidated", "expired"}
+        assert rows[0]["r_multiple"] is None
 
-    def test_no_session_after_as_of_produces_no_row(self):
+
+class TestBaselineIsAControl:
+    def test_it_ignores_signal_conditions_and_buys_everything_tradable(self):
+        # This name fails BREAKOUT's candidate_rule outright, yet must still
+        # appear in the control — "buy everything" has to mean everything.
         code = "72030"
-        closes = [1000 + i * 5 for i in range(25)]
-        bars = {code: make_bars(code, closes)}
-        as_of = bars[code][-1].date  # last available bar — nothing to enter on
-        features_by_date = {as_of: {code: feat_row(ma_25=closes[-2] - 5)}}
-        securities = {code: {"code": code}}
-        turnover = {(code, as_of): 5_000_000_000}
-
-        rows = replay(features_by_date, bars, securities, [BREAKOUT], [as_of], turnover)
-        assert rows == []
-
-    def test_a_non_qualifying_code_produces_no_row(self):
-        code = "72030"
-        closes = [1000.0] * 30  # flat — never above its own ma_25 with the given feature
-        bars = {code: make_bars(code, closes)}
+        bars = {code: bars_from([1000.0] * 40)}
         as_of = bars[code][24].date
-        features_by_date = {as_of: {code: feat_row(ma_25=2000.0)}}  # close never above ma_25
-        securities = {code: {"code": code}}
-        turnover = {(code, as_of): 5_000_000_000}
+        rows = baseline(
+            {as_of: {code: feat_row(ma_25=2000.0)}},
+            bars,
+            {code: {"code": code}},
+            [BREAKOUT],
+            [as_of],
+            {(code, as_of): 5_000_000_000},
+        )
+        assert len(rows) == 1
+        assert rows[0]["n_trades"] == 1
 
-        rows = replay(features_by_date, bars, securities, [BREAKOUT], [as_of], turnover)
+    def test_it_still_applies_the_liquidity_floor(self):
+        # A name too thin to fill isn't a fair member of "buy everything".
+        code = "72030"
+        bars = {code: bars_from([1000.0] * 40)}
+        as_of = bars[code][24].date
+        rows = baseline(
+            {as_of: {code: feat_row()}},
+            bars,
+            {code: {"code": code}},
+            [BREAKOUT],
+            [as_of],
+            {(code, as_of): 1_000_000},  # below min_turnover
+        )
         assert rows == []
+
+    def test_it_does_not_wait_for_a_trigger(self):
+        # The control buys on as_of+1 regardless of price action. Waiting is
+        # part of what the Setup does, so it has to beat not-waiting.
+        code = "72030"
+        # Flat forever: a trigger-waiting walk would expire, the control fills.
+        bars = {code: bars_from([1000.0] * 40)}
+        as_of = bars[code][24].date
+        rows = baseline(
+            {as_of: {code: feat_row()}},
+            bars,
+            {code: {"code": code}},
+            [BREAKOUT],
+            [as_of],
+            {(code, as_of): 5_000_000_000},
+        )
+        assert rows[0]["n_trades"] == 1
+
+    def test_a_name_without_atr_is_skipped(self):
+        code = "72030"
+        bars = {code: bars_from([1000.0] * 40)}
+        as_of = bars[code][24].date
+        rows = baseline(
+            {as_of: {code: feat_row(atr_14=None)}},
+            bars,
+            {code: {"code": code}},
+            [BREAKOUT],
+            [as_of],
+            {(code, as_of): 5_000_000_000},
+        )
+        assert rows == []
+
+    def test_sum_r_is_kept_so_sessions_weight_by_trade_count(self):
+        # Averaging per-session averages would weight a 2-name session the
+        # same as a 200-name one.
+        codes = ["A", "B"]
+        bars = {c: bars_from([1000.0] * 40) for c in codes}
+        as_of = bars["A"][24].date
+        rows = baseline(
+            {as_of: {c: feat_row() for c in codes}},
+            bars,
+            {c: {"code": c} for c in codes},
+            [BREAKOUT],
+            [as_of],
+            {(c, as_of): 5_000_000_000 for c in codes},
+        )
+        assert rows[0]["n_trades"] == 2
+        assert "sum_r" in rows[0]
