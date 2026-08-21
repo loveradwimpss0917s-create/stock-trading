@@ -159,3 +159,26 @@ class TestBaselineIsAControl:
         from pipeline_py.tests.test_screening import row
 
         assert levels_for(row(turnover_value=MIN_TURNOVER - 1), "swing") is None
+
+
+class TestGapPastTheTarget:
+    def test_an_open_above_the_target_is_not_a_trade(self):
+        """Nobody buys a name that has already gone where they were hoping
+        it would go. Recording it as a 0R target hit — which is what the
+        barrier walk produces if this is not caught — both inflates how
+        often the target is reached and drags its average toward zero."""
+        bars = [bar("2026-01-02", 115.0, 118.0, 114.0, 117.0)]
+        out = evaluate(bars, 0, stop=95.0, target=110.0, max_hold=5)
+        assert out.outcome == "no_entry"
+        assert out.r_multiple is None
+
+    def test_an_open_exactly_at_the_target_is_also_not_a_trade(self):
+        bars = [bar("2026-01-02", 110.0, 112.0, 109.0, 111.0)]
+        out = evaluate(bars, 0, stop=95.0, target=110.0, max_hold=5)
+        assert out.outcome == "no_entry"
+
+    def test_an_open_below_the_target_still_trades_normally(self):
+        bars = [bar("2026-01-02", 109.9, 112.0, 109.0, 111.0)]
+        out = evaluate(bars, 0, stop=95.0, target=110.0, max_hold=5)
+        assert out.outcome == "target"
+        assert out.r_multiple is not None

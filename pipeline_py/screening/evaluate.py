@@ -74,6 +74,17 @@ def evaluate(
         # entering a position that is beyond its own risk limit before it
         # starts, so the screen simply does not get the trade.
         return Outcome("no_entry", fill, None, None, 0, None)
+    if fill >= target:
+        # The open gapped past the profit target too. Nobody buys a name
+        # that has already gone where they were hoping it would go, so this
+        # is a trade that does not happen — not a 0R win.
+        #
+        # Recording it as a target hit, which is what falls out of the
+        # barrier walk if this case isn't caught, is doubly wrong: it adds
+        # to the count of targets reached AND drags their average return
+        # toward zero, so the Setup looks like it hits its target more often
+        # and for less than it really does.
+        return Outcome("no_entry", fill, None, None, 0, None)
 
     last = min(entry_idx + max_hold - 1, len(bars) - 1)
     for i in range(entry_idx, last + 1):

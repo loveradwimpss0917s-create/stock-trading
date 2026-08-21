@@ -1,7 +1,9 @@
+import pytest
+
 from datetime import date, timedelta
 
 from pipeline_py.screening.evaluate import Bar
-from pipeline_py.setups.replay import baseline, replay, walk_plan
+from pipeline_py.setups.replay import baseline, replay, walk_plan, entry_slip_r
 
 BREAKOUT = {
     "key": "breakout_20d",
@@ -304,3 +306,26 @@ class TestCostsAreChargedSymmetrically:
             {(code, as_of): 5_000_000_000},
         )
         assert rows[0]["cost_r"] is None
+
+
+class TestEntrySlippage:
+    def test_it_reports_how_far_above_the_trigger_the_fill_landed(self):
+        # trigger 100, stop 90 -> risk 10. A fill at 103 is 0.3R of slippage
+        # before the trade has done anything at all.
+        assert entry_slip_r(103.0, 100.0, 90.0) == pytest.approx(0.3)
+
+    def test_a_fill_at_the_trigger_costs_nothing(self):
+        assert entry_slip_r(100.0, 100.0, 90.0) == pytest.approx(0.0)
+
+    def test_a_plan_that_never_filled_has_no_slippage(self):
+        assert entry_slip_r(None, 100.0, 90.0) is None
+
+    def test_a_tighter_stop_makes_the_same_yen_gap_cost_more_in_r(self):
+        """Same as the round-trip cost result, and for the same reason: the
+        risk unit shrank while the gap in yen did not."""
+        wide = entry_slip_r(103.0, 100.0, 90.0)   # risk 10
+        tight = entry_slip_r(103.0, 100.0, 95.0)  # risk 5
+        assert tight == pytest.approx(2 * wide)
+
+    def test_an_inverted_stop_yields_none_rather_than_a_negative_ratio(self):
+        assert entry_slip_r(103.0, 100.0, 100.0) is None

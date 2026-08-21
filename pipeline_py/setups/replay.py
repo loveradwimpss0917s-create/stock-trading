@@ -171,9 +171,38 @@ def replay(
                         "outcome": result["outcome"],
                         "r_multiple": result.get("r_multiple"),
                         "cost_r": cost_r,
+                        "entry_slip_r": entry_slip_r(
+                            result.get("entry_fill"),
+                            levels.trigger_price,
+                            levels.stop_planned,
+                        ),
                     }
                 )
     return rows
+
+
+def entry_slip_r(
+    entry_fill: Optional[float], trigger_price: float, stop_planned: float
+) -> Optional[float]:
+    """How far above its own trigger the plan actually filled, in R.
+
+    This is not modelled slippage — it is the gap between the price the
+    plan was built around and the price the next session opened at, which
+    is what "wait for a close above X, buy the next open" costs in
+    practice. r_multiple already absorbs it (risk is measured from the
+    fill), so it has been paid all along without ever being shown.
+
+    Worth its own column because it is not a rounding error: measured here
+    it runs 0.3-0.4R, larger than commission and spread put together, and
+    it belongs to the entry mechanic rather than to the broker. A Setup
+    cannot be made viable by cutting fees if this is where the money goes.
+    """
+    if entry_fill is None:
+        return None
+    risk = trigger_price - stop_planned
+    if risk <= 0:
+        return None
+    return (entry_fill - trigger_price) / risk
 
 
 def baseline(

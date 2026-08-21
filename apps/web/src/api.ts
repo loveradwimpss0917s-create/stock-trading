@@ -461,6 +461,7 @@ export interface SetupEdge {
   n_no_entry: number;
   gross_avg_r: number | null;
   avg_cost_r: number | null;
+  avg_entry_slip_r: number | null;
   avg_r: number | null;
   win_rate: number | null;
   stop_atr_mult: number | null;

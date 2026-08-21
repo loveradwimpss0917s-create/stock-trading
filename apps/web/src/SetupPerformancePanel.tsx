@@ -62,6 +62,7 @@ export function SetupPerformancePanel() {
               <th className="num">純R</th>
               <th className="num">総R</th>
               <th className="num">コスト</th>
+              <th className="num">エントリー滑り</th>
               <th className="num">損切幅</th>
               <th className="num">対照群(純)</th>
               <th className="num">取引数</th>
@@ -106,6 +107,14 @@ export function SetupPerformancePanel() {
                     {s.avg_cost_r == null ? '—' : `−${Number(s.avg_cost_r).toFixed(3)}R`}
                   </td>
                   <td
+                    className="num tabular down"
+                    title="トリガー価格に対して実際にいくら高く約定したか。手数料でもスプレッドでもなく、入り方そのもののコスト"
+                  >
+                    {s.avg_entry_slip_r == null
+                      ? '—'
+                      : `−${Number(s.avg_entry_slip_r).toFixed(3)}R`}
+                  </td>
+                  <td
                     className="num tabular muted"
                     title="損切りをATRの何倍に置いているか。狭いほどR単位のコストが膨らむ"
                   >
@@ -133,6 +142,17 @@ export function SetupPerformancePanel() {
         <code> 2 × 0.10 ÷ 損切り倍率 </code>に収束します。損切り1.0×ATRなら約0.20R、
         1.8×ATRなら約0.11R。<strong>同じ執行品質でも、損切りが狭いだけでコストは倍近くになります。</strong>
         「損切りを浅くしてリスクを抑える」は、R単位では逆効果になり得ます。
+      </p>
+
+      <p className="muted footnote">
+        <strong>ただし最大の費目は往復コストではなく、エントリー滑りです。</strong>
+        「終値がXを超えたら翌日の寄りで買う」という入り方は、実測で平均
+        0.3〜0.4R 高い値段で約定しています。スプレッドでも手数料でもなく、
+        入り方そのものが払っているコストで、往復コスト（0.10〜0.18R）より大きい。
+        <strong>手数料の安い証券会社に移しても、ここは1円も改善しません。</strong>
+        改善するとすれば、指値で入る・トリガーを翌日の寄りに賭けない、といった
+        執行方法の変更だけです。なお純Rにはこの滑りが既に含まれています
+        （Rは実約定値から測っているため）——今まで表示していなかっただけです。
       </p>
 
       <p className="muted footnote">
