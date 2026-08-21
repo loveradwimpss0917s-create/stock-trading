@@ -152,6 +152,22 @@ app.get('/setups', async (c) => {
   return c.json({ setups });
 });
 
+/** Setup performance against the control — never the raw avg_r alone.
+ *
+ * The theme system taught this the expensive way: every theme showed a
+ * positive average R until screen_baseline was subtracted, at which point
+ * the whole effect turned out to be the rising market. edge_r (Setup minus
+ * "buy everything tradable, same sessions, same ATR multiples") is the
+ * only number here that says whether choosing helped, so the raw figures
+ * are returned alongside it rather than on their own. */
+app.get('/setup-performance', async (c) => {
+  const rows = await selectFrom<Record<string, unknown>>(c.env, 'setup_edge', {
+    select: '*',
+    order: 'setup_key.asc',
+  });
+  return c.json({ performance: rows });
+});
+
 app.get('/regime', async (c) => {
   const date = c.req.query('date');
   const rows = await selectFrom<Record<string, unknown>>(c.env, 'regime_snapshots', {
@@ -557,6 +573,18 @@ interface ReplayDecision {
   decision: Decision;
   reason_code: string;
 }
+
+/** Your BUY calls vs adopting every candidate vs buying everything, over
+ * the same revealed sessions. Three cohorts rather than two because a
+ * two-way comparison can't separate "you picked well" from "the Setup
+ * picked well" — if your_buy beats baseline but mechanical beats it by
+ * just as much, the Setup earned that, not your selection. */
+app.get('/replay/scorecard', async (c) => {
+  const rows = await selectFrom<Record<string, unknown>>(c.env, 'replay_scorecard', {
+    select: '*',
+  });
+  return c.json({ scorecard: rows });
+});
 
 app.post('/replay/start', async (c) => {
   // Pick from sessions that actually have judged outcomes, uniformly at

@@ -429,3 +429,41 @@ export const decideReplay = (
 
 export const revealReplay = (sessionId: number) =>
   post<{ as_of: string; results: ReplayResult[] }>(`/api/replay/${sessionId}/reveal`);
+
+// ---------------------------------------------------------------------
+// Setup performance & replay scorecard
+export interface SetupEdge {
+  setup_key: string;
+  setup_name: string;
+  horizon: string;
+  hypothesis: string;
+  n_plans: number;
+  n_trades: number;
+  n_expired: number;
+  n_invalidated: number;
+  n_no_entry: number;
+  avg_r: number | null;
+  win_rate: number | null;
+  baseline_avg_r: number | null;
+  baseline_win_rate: number | null;
+  baseline_n_trades: number | null;
+  edge_r: number | null;
+  sd_r: number | null;
+  se_r: number | null;
+  t_stat: number | null;
+  first_as_of: string | null;
+  last_as_of: string | null;
+}
+
+export interface ScorecardRow {
+  cohort: 'your_buy' | 'mechanical' | 'baseline';
+  n_trades: number;
+  avg_r: number | null;
+  win_rate: number | null;
+}
+
+export const fetchSetupPerformance = () =>
+  get<{ performance: SetupEdge[] }>('/api/setup-performance');
+
+export const fetchReplayScorecard = () =>
+  get<{ scorecard: ScorecardRow[] }>('/api/replay/scorecard');

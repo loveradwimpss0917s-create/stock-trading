@@ -6,6 +6,7 @@ import {
   type ReplayCandidate,
   type ReplayResult,
 } from './api';
+import { ReplayScorecard } from './ReplayScorecard';
 
 function yen(v: number | string | null | undefined): string {
   if (v == null) return '—';
@@ -86,9 +87,12 @@ export function ReplayPanel() {
       </p>
 
       {!sessionId && (
-        <button className="decide-btn decide-buy" onClick={start} disabled={loading}>
-          {loading ? '読み込み中…' : 'リプレイを開始'}
-        </button>
+        <>
+          <ReplayScorecard />
+          <button className="decide-btn decide-buy" onClick={start} disabled={loading}>
+            {loading ? '読み込み中…' : 'リプレイを開始'}
+          </button>
+        </>
       )}
 
       {error && <p className="status-error">{error}</p>}

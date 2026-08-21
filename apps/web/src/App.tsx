@@ -19,6 +19,7 @@ import { PlansPanel } from './PlansPanel';
 import { PositionsPanel } from './PositionsPanel';
 import { PriceChart } from './PriceChart';
 import { ReplayPanel } from './ReplayPanel';
+import { SetupPerformancePanel } from './SetupPerformancePanel';
 import { StrategyPanel } from './StrategyPanel';
 import { ThemePerformancePanel } from './ThemePerformancePanel';
 
@@ -147,6 +148,7 @@ export default function App() {
       {tab === 'candidates' && <CandidatesPanel />}
       {tab === 'results' && (
         <>
+          <SetupPerformancePanel />
           <OutcomeLedger />
           <ThemePerformancePanel />
         </>

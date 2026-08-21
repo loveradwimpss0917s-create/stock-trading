@@ -1,0 +1,127 @@
+import { useEffect, useState } from 'react';
+import { fetchSetupPerformance, type SetupEdge } from './api';
+
+/** Below this an average is noise wearing a decimal point. */
+const MIN_TRADES_TO_READ = 100;
+/** Standard errors an edge must clear to be worth a second look. Not a
+ * significance claim — with several Setups compared at once, one crossing
+ * this by chance is expected. */
+const T_NOTABLE = 2.0;
+
+function r(v: number | null | undefined): string {
+  if (v == null) return '—';
+  return `${v > 0 ? '+' : ''}${Number(v).toFixed(3)}R`;
+}
+
+function pct(v: number | null | undefined): string {
+  return v == null ? '—' : `${(Number(v) * 100).toFixed(1)}%`;
+}
+
+export function SetupPerformancePanel() {
+  const [rows, setRows] = useState<SetupEdge[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSetupPerformance()
+      .then((res) => setRows(res.performance))
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <p className="muted">読み込み中…</p>;
+  if (error) return <p className="status-error">エラー: {error}</p>;
+  if (rows.length === 0) {
+    return (
+      <section className="panel">
+        <h2>Setupの検証</h2>
+        <p className="muted">
+          まだ結果がありません。setup-replay ジョブを実行してください。
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="panel">
+      <h2>Setupの検証</h2>
+      <p className="muted footnote">
+        並び順・判定はすべて<strong>選別効果</strong>（Setup − 無選別に全銘柄を買った場合）で見ます。
+        検証期間は上昇相場なので、買いのみなら銘柄を選ばなくても平均Rはプラスになります。
+        Setupが超えるべき基準は0ではなく対照群です。
+      </p>
+
+      <div className="table-scroll">
+        <table className="quotes">
+          <thead>
+            <tr>
+              <th>Setup</th>
+              <th className="num">選別効果</th>
+              <th className="num">t値</th>
+              <th className="num">Setup平均R</th>
+              <th className="num">対照群</th>
+              <th className="num">取引数</th>
+              <th className="num">勝率</th>
+              <th className="num">不成立</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((s) => {
+              const notable = Math.abs(s.t_stat ?? 0) >= T_NOTABLE;
+              const thin = s.n_trades < MIN_TRADES_TO_READ;
+              const unreadable = !notable || thin;
+              return (
+                <tr key={s.setup_key}>
+                  <td>
+                    {s.setup_name}
+                    <span className="theme-kind">{s.horizon === 'day' ? 'デイ' : 'スイング'}</span>
+                    {thin && <span className="theme-kind">件数不足</span>}
+                  </td>
+                  <td
+                    className={`num tabular ${unreadable ? 'muted' : (s.edge_r ?? 0) > 0 ? 'up' : 'down'}`}
+                    title={
+                      unreadable
+                        ? 'ばらつきの範囲内。差はあるが偶然と区別できない'
+                        : 'Setupの平均R − 無選別に買った場合の平均R'
+                    }
+                  >
+                    {r(s.edge_r)}
+                  </td>
+                  <td className={`num tabular ${notable ? '' : 'muted'}`}>
+                    {s.t_stat == null ? '—' : Number(s.t_stat).toFixed(2)}
+                    {!notable && ' 〓'}
+                  </td>
+                  <td className="num tabular">{r(s.avg_r)}</td>
+                  <td className="num tabular muted">{r(s.baseline_avg_r)}</td>
+                  <td className="num tabular">{s.n_trades.toLocaleString('ja-JP')}</td>
+                  <td className="num tabular">{pct(s.win_rate)}</td>
+                  <td
+                    className="num tabular muted"
+                    title="トリガー未到達で期限切れ・反証成立・窓開けで建てられず"
+                  >
+                    {(s.n_expired + s.n_invalidated + s.n_no_entry).toLocaleString('ja-JP')}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="muted footnote">
+        <strong>「不成立」はSetupを運用するコストです。</strong>
+        候補に出てもトリガーに到達せず期限切れになったもの、反証が先に成立したもの、
+        翌寄りが既に損切り水準を割っていて建てられなかったものの合計。
+        取引できなかった分は平均Rの分母に入りませんが、件数は「この手法で何回空振りするか」を表します。
+      </p>
+      <p className="muted footnote">
+        <strong>t値が2未満（〓）の行は、差はあっても偶然と区別できません。</strong>
+        しかもこのt値は<strong>上限であって下限ではありません</strong>：
+        サンプリング間隔に対し保有期間が長いため取引が重なって実効サンプル数は件数より少なく、
+        さらに複数Setupを同時に比較しているので、全て無力でも|t|&gt;2が偶然出ることがあります。
+        <strong>まだ検証期間と、Setupを設計するときに見ていた期間が同じです。</strong>
+        将来も同じ成績が出る証拠ではありません。
+      </p>
+    </section>
+  );
+}
