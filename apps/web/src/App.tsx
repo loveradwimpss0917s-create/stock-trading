@@ -12,6 +12,7 @@ import {
   type SyncStatus,
 } from './api';
 import { CandidatesPanel } from './CandidatesPanel';
+import { DisciplinePanel } from './DisciplinePanel';
 import { HomePanel } from './HomePanel';
 import { JournalPanel } from './JournalPanel';
 import { OutcomeLedger } from './OutcomeLedger';
@@ -26,7 +27,7 @@ import { ThemePerformancePanel } from './ThemePerformancePanel';
 
 type Tab =
   | 'home' | 'plans' | 'positions' | 'journal'
-  | 'risk' | 'replay' | 'candidates' | 'results' | 'research';
+  | 'discipline' | 'risk' | 'replay' | 'candidates' | 'results' | 'research';
 
 function pctChange(quotes: DailyQuote[]): number | null {
   const closes = quotes.map((q) => (q.close === null ? NaN : Number(q.close))).filter((v) => !Number.isNaN(v));
@@ -125,6 +126,7 @@ export default function App() {
             ['plans', '計画'],
             ['positions', '建玉'],
             ['journal', 'ジャーナル'],
+            ['discipline', '規律'],
             ['risk', 'リスク計算'],
             ['replay', 'リプレイ訓練'],
             ['candidates', 'テーマ別候補'],
@@ -148,6 +150,7 @@ export default function App() {
       {tab === 'plans' && <PlansPanel />}
       {tab === 'positions' && <PositionsPanel />}
       {tab === 'journal' && <JournalPanel />}
+      {tab === 'discipline' && <DisciplinePanel />}
       {tab === 'risk' && <RiskLabPanel />}
       {tab === 'replay' && <ReplayPanel />}
       {tab === 'candidates' && <CandidatesPanel />}

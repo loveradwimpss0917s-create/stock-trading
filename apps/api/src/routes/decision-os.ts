@@ -183,6 +183,32 @@ app.get('/setup-performance', async (c) => {
   return c.json({ performance: rows });
 });
 
+/**
+ * The discipline audit. Nothing here depends on a Setup or Regime being
+ * valid — it only reports what the user did relative to their own plan,
+ * which is arithmetic about the past rather than a claim about the future.
+ * That makes it the half of the app that is trustworthy today.
+ *
+ * Both shapes are returned together because the summary is the number that
+ * matters and the per-position rows are what make it arguable: a rate with
+ * no way to see which trades produced it invites dismissal.
+ */
+app.get('/discipline', async (c) => {
+  const accountId = c.req.query('account_id') ?? '1';
+  const [summary, positions] = await Promise.all([
+    selectFrom<Record<string, unknown>>(c.env, 'discipline_summary', {
+      select: '*',
+      account_id: `eq.${accountId}`,
+    }),
+    selectFrom<Record<string, unknown>>(c.env, 'position_behaviour', {
+      select: '*',
+      account_id: `eq.${accountId}`,
+      order: 'opened_on.desc',
+    }),
+  ]);
+  return c.json({ summary: summary[0] ?? null, positions });
+});
+
 app.get('/regime', async (c) => {
   const date = c.req.query('date');
   const rows = await selectFrom<Record<string, unknown>>(c.env, 'regime_snapshots', {

@@ -489,3 +489,45 @@ export const fetchSetupPerformance = () =>
 
 export const fetchReplayScorecard = () =>
   get<{ scorecard: ScorecardRow[] }>('/api/replay/scorecard');
+
+/** One closed or open position, judged against the plan it came from.
+ * Every field is a fact about what was done, not a prediction. */
+export interface PositionBehaviour {
+  position_id: number;
+  code: string;
+  setup_key: string;
+  opened_on: string;
+  closed_on: string | null;
+  status: string;
+  exit_reason: string | null;
+  r_multiple: number | null;
+  mae_r: number | null;
+  mfe_r: number | null;
+  stop_planned: number;
+  stop_current: number;
+  risk_taken_yen: number | null;
+  stop_widened: boolean;
+  held_past_time_stop: boolean;
+  cut_a_winner_short: boolean;
+  rode_past_the_stop: boolean;
+  overrode_a_pass: boolean;
+  no_recorded_decision: boolean;
+}
+
+export interface DisciplineSummary {
+  n_positions: number;
+  n_closed: number;
+  n_stop_widened: number;
+  n_held_past_time_stop: number;
+  n_cut_short: number;
+  n_rode_past_stop: number;
+  n_overrode_pass: number;
+  n_no_decision: number;
+  n_sized_up_after_loss: number;
+  avg_hold_winners: number | null;
+  avg_hold_losers: number | null;
+  plan_adherence_rate: number | null;
+}
+
+export const fetchDiscipline = () =>
+  get<{ summary: DisciplineSummary | null; positions: PositionBehaviour[] }>('/api/discipline');

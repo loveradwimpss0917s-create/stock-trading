@@ -479,7 +479,7 @@ body {
   gap: 4px;
   margin-bottom: 18px;
   border-bottom: 1px solid var(--border);
-  /* 8 tabs don't fit one line on a phone; scroll horizontally rather than
+  /* 10 tabs don't fit one line on a phone; scroll horizontally rather than
      wrapping or letting them get crushed into vertical text. */
   overflow-x: auto;
   overflow-y: hidden;
