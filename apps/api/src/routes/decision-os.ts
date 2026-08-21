@@ -37,6 +37,7 @@ interface PlanRow {
   setup_name?: string;
   setup_horizon?: string;
   setup_hypothesis?: string;
+  setup_stop_rule?: { type: string; mult: number } | null;
   ticker4?: string;
   security_name?: string;
   sector33?: string | null;
@@ -124,12 +125,26 @@ async function loadPortfolioContext(env: SupabaseEnv, accountId: number): Promis
   };
 }
 
+/** ATR isn't a column on trade_plans, but it doesn't need to be: the stop is
+ * defined as trigger − mult × ATR, so the multiple recovers it exactly. The
+ * cost model needs it because slippage scales with range — without it the
+ * flat floor applies and cost comes out optimistically low on exactly the
+ * volatile names where it is worst. */
+function impliedAtr(plan: PlanRow): number | null {
+  const rule = plan.setup_stop_rule;
+  if (rule?.type !== 'atr_mult' || !rule.mult) return null;
+  const risk = Number(plan.trigger_price) - Number(plan.stop_planned);
+  if (!(risk > 0)) return null;
+  return risk / rule.mult;
+}
+
 function toPlanLevels(plan: PlanRow): PlanLevels {
   return {
     triggerPrice: Number(plan.trigger_price),
     stopPlanned: Number(plan.stop_planned),
     targetPlanned: Number(plan.target_planned),
     sector33: plan.sector33,
+    atr: impliedAtr(plan),
     // Turnover/ADV aren't columns on trade_plans (resolved once at draft
     // time by the Python scan batch, not re-fetched here) — the liquidity
     // gates were already evaluated as part of candidate_rule before the

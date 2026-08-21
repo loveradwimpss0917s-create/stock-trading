@@ -1,8 +1,9 @@
 """Risk Engine: turns a trade plan's price levels into a position size and a
 BUY / WAIT / PASS verdict.
 
-Every gate here is arithmetic: R:R, lot size, notional, portfolio heat,
-open-position count, sector concentration, turnover, liquidity. None of it
+Every gate here is arithmetic: R:R (net of execution cost), lot size,
+notional, portfolio heat, open-position count, sector concentration,
+turnover, liquidity. None of it
 requires an unproven Setup or Regime to be right — that is deliberate. The
 design's central rule is that unproven ideas get recorded, not gated on;
 only calculations that don't need statistical validation are allowed to
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..screening.scoring import MIN_TURNOVER
+from .cost_in_r import PlanEconomics, plan_economics
 
 LOT_SIZE = 100
 
@@ -52,6 +54,11 @@ class PlanLevels:
     sector33: Optional[str] = None
     turnover_value: Optional[float] = None
     avg_volume_20d: Optional[float] = None
+    # Drives the cost model. Absent, cost falls back to the flat slippage
+    # floor, which understates it on volatile names — so the resulting R:R
+    # is optimistic rather than wrong in the safe direction. Callers that
+    # can supply ATR should.
+    atr: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -62,8 +69,10 @@ class RiskVerdict:
     risk_amount: float
     risk_pct: float
     notional: float
-    rr: float
+    rr_gross: float
+    rr_net: float
     gates: dict[str, dict]
+    economics: Optional[PlanEconomics] = None
 
 
 def position_size(
@@ -90,12 +99,20 @@ def evaluate(account: dict, levels: PlanLevels, ctx: PortfolioContext) -> RiskVe
     max_heat, max_notional_pct, min_rr, max_sector_positions)."""
     gates: dict[str, dict] = {}
 
-    risk_per_share = levels.trigger_price - levels.stop_planned
-    reward_per_share = levels.target_planned - levels.trigger_price
-    rr = reward_per_share / risk_per_share if risk_per_share > 0 else 0.0
+    # The R:R gate is evaluated NET of execution cost. Gating on the gross
+    # figure would approve plans whose advertised edge is entirely consumed
+    # by getting in and out — on this repo's own data the round trip runs
+    # 0.10-0.18R, which is larger than any selection effect measured here.
+    # Cost is arithmetic, not a hypothesis, so it is allowed to block.
+    econ = plan_economics(
+        levels.trigger_price, levels.stop_planned, levels.target_planned, levels.atr
+    )
+    rr_gross = econ.rr_gross if econ else 0.0
+    rr_net = econ.rr_net if econ else 0.0
     gates["min_rr"] = {
-        "passed": rr >= account["min_rr"],
-        "value": round(rr, 3),
+        "passed": rr_net >= account["min_rr"],
+        "value": round(rr_net, 3),
+        "gross": round(rr_gross, 3),
         "threshold": account["min_rr"],
     }
 
@@ -154,13 +171,23 @@ def evaluate(account: dict, levels: PlanLevels, ctx: PortfolioContext) -> RiskVe
     else:
         gates["liquidity"] = {"passed": True, "value": None}
 
+    def verdict(decision: str, reason: str) -> RiskVerdict:
+        return RiskVerdict(
+            decision, reason, shares, risk_amount, risk_pct, notional, rr_gross, rr_net, gates, econ
+        )
+
     for gate in PASS_GATES:
         if not gates[gate]["passed"]:
-            return RiskVerdict("PASS", gate, shares, risk_amount, risk_pct, notional, rr, gates)
+            # A plan whose gross R:R cleared the bar and whose net one did not
+            # failed for a reason the user can act on — widen the stop, or
+            # accept that this particular trade is too tight to be worth
+            # taking — so it gets its own reason rather than reading as an
+            # ordinary bad-R:R rejection.
+            if gate == "min_rr" and rr_gross >= account["min_rr"]:
+                return verdict("PASS", "min_rr_after_cost")
+            return verdict("PASS", gate)
     for gate in WAIT_GATES:
         if not gates[gate]["passed"]:
-            return RiskVerdict("WAIT", gate, shares, risk_amount, risk_pct, notional, rr, gates)
+            return verdict("WAIT", gate)
 
-    return RiskVerdict(
-        "BUY", "all_gates_passed", shares, risk_amount, risk_pct, notional, rr, gates
-    )
+    return verdict("BUY", "all_gates_passed")

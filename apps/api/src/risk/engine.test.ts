@@ -82,7 +82,9 @@ describe('evaluateRisk gate decisions', () => {
   it('PASSes when notional exceeds the cap', () => {
     const v = evaluateRisk(
       account({ capital: 5_000_000, max_notional_pct: 0.3 }),
-      levels({ triggerPrice: 1000, stopPlanned: 999, targetPlanned: 1002 }),
+      // 1% stop rather than 0.1%: at 0.1% the round trip alone is ~1R, so
+      // the plan would fail on cost before ever reaching the notional gate.
+      levels({ triggerPrice: 1000, stopPlanned: 990, targetPlanned: 1020 }),
       ctx()
     );
     expect(v.decision).toBe('PASS');
@@ -153,5 +155,76 @@ describe('gate priority', () => {
   it('every gate is populated even when an early one fails', () => {
     const v = evaluateRisk(account(), levels({ targetPlanned: 4300.0 }), ctx());
     expect(Object.keys(v.gates).sort()).toEqual([...PASS_GATES, ...WAIT_GATES].sort());
+  });
+});
+
+describe('cost-aware R:R', () => {
+  // The gate is evaluated net of execution cost. Every figure the app
+  // reported before this was gross, i.e. a return nobody could have taken.
+
+  it('reports a lower R:R than the chart says', () => {
+    const v = evaluateRisk(account(), levels(), ctx());
+    expect(v.rrNet).toBeLessThan(v.rrGross);
+    expect(v.gates.min_rr.gross).toBeGreaterThan(v.gates.min_rr.value!);
+  });
+
+  it('rejects a plan that only clears the bar before cost', () => {
+    // risk 170/share; a target of exactly 1.5R gross is 4250 + 255.
+    const v = evaluateRisk(account({ min_rr: 1.5 }), levels({ targetPlanned: 4505.0 }), ctx());
+    expect(v.gates.min_rr.gross).toBeGreaterThanOrEqual(1.5);
+    expect(v.decision).toBe('PASS');
+    expect(v.reasonCode).toBe('min_rr_after_cost');
+  });
+
+  it('still reads a genuinely bad R:R as an ordinary rejection', () => {
+    const v = evaluateRisk(account(), levels({ targetPlanned: 4350.0 }), ctx());
+    expect(v.reasonCode).toBe('min_rr');
+  });
+
+  it('charges more in R for a tighter stop at identical execution', () => {
+    // 'Risking less per share' makes the trade more expensive in its own
+    // risk unit, because the unit shrank faster than the cost did.
+    const atr = 100;
+    const tight = evaluateRisk(
+      account({ min_rr: 0 }),
+      levels({ triggerPrice: 4250, stopPlanned: 4150, targetPlanned: 4550, atr }),
+      ctx()
+    );
+    const wide = evaluateRisk(
+      account({ min_rr: 0 }),
+      levels({ triggerPrice: 4250, stopPlanned: 4050, targetPlanned: 4850, atr }),
+      ctx()
+    );
+    expect(tight.rrGross).toBeCloseTo(wide.rrGross, 10);
+    expect(tight.economics!.costLossR).toBeGreaterThan(wide.economics!.costLossR);
+    expect(tight.rrNet).toBeLessThan(wide.rrNet);
+  });
+
+  it('raises the break-even win rate once cost is charged', () => {
+    const e = evaluateRisk(account(), levels({ atr: 100 }), ctx()).economics!;
+    expect(e.requiredWinRateNet!).toBeGreaterThan(e.requiredWinRateGross!);
+  });
+
+  it('reports no win rate for a plan that cannot cover its own cost', () => {
+    const v = evaluateRisk(
+      account({ min_rr: 0 }),
+      levels({ triggerPrice: 1000, stopPlanned: 999, targetPlanned: 1000.5 }),
+      ctx()
+    );
+    expect(v.rrNet).toBeLessThan(0);
+    expect(v.economics!.requiredWinRateNet).toBeNull();
+    expect(v.decision).toBe('PASS');
+  });
+
+  it('falls back to the slippage floor rather than to zero cost without ATR', () => {
+    const v = evaluateRisk(account(), levels({ atr: null }), ctx());
+    expect(v.economics!.costWinR).toBeGreaterThan(0);
+  });
+
+  it('reports no economics for an inverted stop', () => {
+    const v = evaluateRisk(account(), levels({ stopPlanned: 4300 }), ctx());
+    expect(v.economics).toBeNull();
+    expect(v.rrNet).toBe(0);
+    expect(v.decision).toBe('PASS');
   });
 });

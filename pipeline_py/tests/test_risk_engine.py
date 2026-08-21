@@ -1,3 +1,5 @@
+import pytest
+
 from pipeline_py.risk.engine import PASS_GATES, WAIT_GATES, PlanLevels, PortfolioContext, evaluate, position_size
 
 
@@ -78,10 +80,12 @@ class TestGateDecisions:
 
     def test_notional_over_the_cap_is_a_pass(self):
         # A cheap stop distance produces a huge share count that blows past
-        # the notional cap even though R:R and lot size are fine.
+        # the notional cap even though R:R and lot size are fine. The stop is
+        # 1% rather than 0.1%: at 0.1% the round trip alone is ~1R, so the
+        # plan would fail on cost before it ever reached the notional gate.
         v = evaluate(
             account(capital=5_000_000, max_notional_pct=0.30),
-            levels(trigger_price=1000.0, stop_planned=999.0, target_planned=1002.0),
+            levels(trigger_price=1000.0, stop_planned=990.0, target_planned=1020.0),
             ctx(),
         )
         assert v.decision == "PASS"
@@ -153,3 +157,78 @@ class TestGatePriority:
         # gate must be evaluated regardless of which one determines the verdict.
         v = evaluate(account(), levels(target_planned=4300.0), ctx())
         assert set(v.gates) == set(PASS_GATES) | set(WAIT_GATES)
+
+
+class TestCostAwareRR:
+    """The R:R gate is evaluated net of execution cost. Every figure the app
+    reported before this was gross, i.e. a return nobody could have taken."""
+
+    def test_the_reported_rr_is_lower_than_the_chart_says(self):
+        v = evaluate(account(), levels(), ctx())
+        assert v.rr_net < v.rr_gross
+        assert v.gates["min_rr"]["value"] == round(v.rr_net, 3)
+        assert v.gates["min_rr"]["gross"] == round(v.rr_gross, 3)
+
+    def test_a_plan_that_only_clears_the_bar_before_cost_is_rejected(self):
+        """The gate this whole change exists for: gross 1.5R against a
+        min_rr of 1.5 is not a 1.5R trade once the round trip is paid."""
+        # risk 170/share; a target of exactly 1.5R gross is 4250 + 255.
+        v = evaluate(account(min_rr=1.5), levels(target_planned=4505.0), ctx())
+        assert v.gates["min_rr"]["gross"] >= 1.5
+        assert v.decision == "PASS"
+        assert v.reason_code == "min_rr_after_cost"
+
+    def test_a_genuinely_bad_rr_still_reads_as_an_ordinary_rejection(self):
+        # Not a cost problem — the plan was never close. The distinct reason
+        # code must not swallow the plain case.
+        v = evaluate(account(), levels(target_planned=4350.0), ctx())
+        assert v.reason_code == "min_rr"
+
+    def test_a_tighter_stop_costs_more_in_r_for_identical_execution(self):
+        """The counter-intuitive result worth surfacing: 'risking less per
+        share' makes the trade more expensive in its own risk unit, because
+        the unit shrank faster than the cost did."""
+        atr = 100.0
+        tight = evaluate(
+            account(min_rr=0.0),
+            levels(trigger_price=4250.0, stop_planned=4250.0 - 1.0 * atr,
+                   target_planned=4250.0 + 3.0 * atr, atr=atr),
+            ctx(),
+        )
+        wide = evaluate(
+            account(min_rr=0.0),
+            levels(trigger_price=4250.0, stop_planned=4250.0 - 2.0 * atr,
+                   target_planned=4250.0 + 6.0 * atr, atr=atr),
+            ctx(),
+        )
+        # Same 3:1 gross on both.
+        assert tight.rr_gross == pytest.approx(wide.rr_gross)
+        assert tight.economics.cost_loss_r > wide.economics.cost_loss_r
+        assert tight.rr_net < wide.rr_net
+
+    def test_the_break_even_win_rate_rises_once_cost_is_charged(self):
+        v = evaluate(account(), levels(atr=100.0), ctx())
+        econ = v.economics
+        assert econ.required_win_rate_net > econ.required_win_rate_gross
+
+    def test_a_plan_whose_target_cannot_cover_its_own_cost_has_no_win_rate(self):
+        # Best case is a net loss, so no hit rate makes it profitable. The
+        # honest answer is "none", not a plausible-looking fraction.
+        v = evaluate(
+            account(min_rr=0.0),
+            levels(trigger_price=1000.0, stop_planned=999.0, target_planned=1000.5),
+            ctx(),
+        )
+        assert v.rr_net < 0
+        assert v.economics.required_win_rate_net is None
+        assert v.decision == "PASS"
+
+    def test_missing_atr_falls_back_to_the_floor_rather_than_to_zero_cost(self):
+        v = evaluate(account(), levels(atr=None), ctx())
+        assert v.economics.cost_win_r > 0
+
+    def test_an_inverted_stop_reports_no_economics_and_still_passes_out(self):
+        v = evaluate(account(), levels(stop_planned=4300.0), ctx())
+        assert v.economics is None
+        assert v.rr_net == 0.0
+        assert v.decision == "PASS"

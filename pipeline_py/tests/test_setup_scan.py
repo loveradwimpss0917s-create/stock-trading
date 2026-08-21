@@ -12,7 +12,10 @@ BREAKOUT = {
     "trigger_rule": {"type": "close_above", "ref": "high_20", "buffer_pct": 0.0},
     "invalidation_rule": {"type": "close_below", "ref": "low_10"},
     "stop_rule": {"type": "atr_mult", "mult": 1.8},
-    "target_rule": {"type": "atr_mult", "mult": 3.0},
+    # 3.5x, not 3.0x: at 3.0x the gross 1.667 falls to 1.400 net of the
+    # round trip and the plan fails its own min_rr. Mirrors the live setup
+    # definitions after migration 0030.
+    "target_rule": {"type": "atr_mult", "mult": 3.5},
     "time_stop_bars": 10,
     "expiry_bars": 5,
     "min_rr": 1.5,

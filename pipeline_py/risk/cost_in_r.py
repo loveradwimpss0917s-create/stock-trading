@@ -73,6 +73,79 @@ def cost_in_r(
     return per_share / risk_per_share
 
 
+@dataclass(frozen=True)
+class PlanEconomics:
+    """A plan's payoff before and after execution cost."""
+
+    rr_gross: float
+    rr_net: float
+    cost_win_r: float
+    cost_loss_r: float
+    required_win_rate_gross: Optional[float]
+    required_win_rate_net: Optional[float]
+
+
+def _required_win_rate(win_r: float, loss_r: float) -> Optional[float]:
+    """Break-even hit rate for a payoff of win_r against a loss of loss_r.
+
+    None when win_r is non-positive: no hit rate rescues a trade whose best
+    case is a loss, and the ratio would silently return a plausible-looking
+    fraction if computed anyway.
+    """
+    if win_r <= 0 or loss_r <= 0:
+        return None
+    return loss_r / (win_r + loss_r)
+
+
+def plan_economics(
+    trigger_price: float,
+    stop_planned: float,
+    target_planned: float,
+    atr: Optional[float],
+    cost: CostAssumption = CostAssumption(),
+) -> Optional[PlanEconomics]:
+    """What this plan actually pays, once getting in and out is paid for.
+
+    The advertised R:R is a claim about two prices on a chart. The tradeable
+    R:R is smaller on both sides at once, and that is the part people skip:
+    cost does not merely shave the winner, it also *deepens the loser*. A
+    stopped-out trade loses its 1R plus the round trip, so the denominator
+    grows while the numerator shrinks and the ratio falls faster than a
+    single subtraction suggests.
+
+    Cost is computed separately for the two exits because they happen at
+    different prices — charging the target's cost to a stop-out would
+    overstate what a loss costs on a plan with a wide target.
+
+    The number worth acting on is required_win_rate_net. A 3:1 plan looks
+    like it only needs 25%; on a 1.0x ATR stop the honest figure is near
+    30%, and that five-point gap is the difference between a system that
+    clears its costs and one that funds the broker.
+    """
+    risk_per_share = trigger_price - stop_planned
+    if risk_per_share <= 0:
+        return None
+
+    rr_gross = (target_planned - trigger_price) / risk_per_share
+    cost_win_r = cost_in_r(trigger_price, target_planned, stop_planned, atr, cost)
+    cost_loss_r = cost_in_r(trigger_price, stop_planned, stop_planned, atr, cost)
+    if cost_win_r is None or cost_loss_r is None:
+        return None
+
+    net_win_r = rr_gross - cost_win_r
+    net_loss_r = 1.0 + cost_loss_r  # a loser pays the stop AND the round trip
+    rr_net = net_win_r / net_loss_r
+
+    return PlanEconomics(
+        rr_gross=rr_gross,
+        rr_net=rr_net,
+        cost_win_r=cost_win_r,
+        cost_loss_r=cost_loss_r,
+        required_win_rate_gross=_required_win_rate(rr_gross, 1.0),
+        required_win_rate_net=_required_win_rate(net_win_r, net_loss_r),
+    )
+
+
 def breakeven_slippage_rate(
     gross_r: float, entry_fill: float, exit_price: float, stop_planned: float
 ) -> Optional[float]:

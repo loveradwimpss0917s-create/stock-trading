@@ -282,6 +282,19 @@ export interface GateResult {
   passed: boolean;
   value: number | null;
   threshold?: number;
+  /** min_rr only: the pre-cost figure. */
+  gross?: number;
+}
+
+export interface PlanEconomics {
+  rrGross: number;
+  rrNet: number;
+  costWinR: number;
+  costLossR: number;
+  requiredWinRateGross: number | null;
+  /** null means no win rate makes this plan profitable — its best case is
+   * already a net loss after the round trip. */
+  requiredWinRateNet: number | null;
 }
 
 export interface RiskVerdict {
@@ -291,8 +304,12 @@ export interface RiskVerdict {
   riskAmount: number;
   riskPct: number;
   notional: number;
-  rr: number;
+  /** Advertised R:R — the two prices on the chart. */
+  rrGross: number;
+  /** What the plan actually pays after the round trip. The one to act on. */
+  rrNet: number;
   gates: Record<string, GateResult>;
+  economics: PlanEconomics | null;
 }
 
 export interface Position {

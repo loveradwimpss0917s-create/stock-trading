@@ -16,7 +16,7 @@ function todayISO(): string {
 }
 
 const GATE_LABEL: Record<string, string> = {
-  min_rr: 'リスクリワード比',
+  min_rr: 'リスクリワード比(コスト後)',
   lot_size: '単元株数',
   notional: '投下資金',
   turnover: '売買代金',
@@ -44,6 +44,12 @@ function GateRow({ name, gate }: { name: string; gate: GateResult }) {
       <span className="gate-name">{GATE_LABEL[name] ?? name}</span>
       <span className="gate-value tabular">
         {gate.value == null ? '—' : gate.value}
+        {/* R:R only: the chart figure shown struck through beside the
+            tradeable one, so the gap is visible at the point of decision
+            rather than discovered in the results months later. */}
+        {gate.gross != null && gate.gross !== gate.value && (
+          <span className="muted"> （コスト前 {gate.gross}）</span>
+        )}
         {gate.threshold != null && <span className="muted"> / 基準 {gate.threshold}</span>}
       </span>
     </div>
@@ -280,7 +286,8 @@ export function PlanDetailModal({ planId, onClose, onChanged }: { planId: number
                   <span className="verdict-label">
                     株数 {verdict.shares.toLocaleString('ja-JP')} / リスク額{' '}
                     {yen(verdict.riskAmount)}円 ({(verdict.riskPct * 100).toFixed(2)}%) / R:R{' '}
-                    {verdict.rr.toFixed(2)}
+                    {verdict.rrNet.toFixed(2)}
+                    <span className="muted">（コスト前 {verdict.rrGross.toFixed(2)}）</span>
                   </span>
                 </div>
                 <div className="gate-list">
@@ -288,6 +295,31 @@ export function PlanDetailModal({ planId, onClose, onChanged }: { planId: number
                     <GateRow key={name} name={name} gate={gate} />
                   ))}
                 </div>
+
+                {verdict.economics && (
+                  <p className="muted footnote">
+                    往復コストは{' '}
+                    <strong className="tabular">
+                      {(verdict.economics.costWinR + verdict.economics.costLossR).toFixed(3)}R
+                    </strong>
+                    。この計画で損益トントンにするのに必要な勝率は{' '}
+                    {verdict.economics.requiredWinRateNet != null ? (
+                      <>
+                        <strong className="tabular">
+                          {(verdict.economics.requiredWinRateNet * 100).toFixed(1)}%
+                        </strong>
+                        （コストを無視すれば{' '}
+                        {((verdict.economics.requiredWinRateGross ?? 0) * 100).toFixed(1)}%）。
+                      </>
+                    ) : (
+                      <strong>存在しません — 勝っても往復コストを回収できない計画です。</strong>
+                    )}{' '}
+                    コストはRで効くため、<strong>損切り幅を狭くするほど不利になります</strong>
+                    （往復コスト ≒ 2×スリッページ率 ÷ ATR倍率）。「損失を小さくするために
+                    ストップを詰める」は、Rで見ると逆の結果になります。
+                  </p>
+                )}
+
                 <p className="muted footnote">
                   この判定は機械的なゲート（算術）のみです。買う/待つ/見送るの最終判断はあなたが行い、
                   理由を必ず記録します。

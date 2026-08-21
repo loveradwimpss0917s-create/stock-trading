@@ -21,6 +21,7 @@ import sys
 
 from ..ingest.supabase_client import SupabaseUpsertClient
 from ..ingest.universe import is_operating_company
+from ..risk.cost_in_r import plan_economics
 from ..screening.evaluate import Bar
 from ..screening.run import FEATURE_COLUMNS
 from .rules import passes_candidate_rule, resolve_plan_levels
@@ -115,13 +116,17 @@ def run_scan(top_n_per_setup: int | None = None, persist: bool = False) -> list[
                 if levels is None:
                     continue
 
-                risk_per_share = levels.trigger_price - levels.stop_planned
-                expected_rr = (
-                    (levels.target_planned - levels.trigger_price) / risk_per_share
-                    if risk_per_share > 0
-                    else 0.0
+                # Screen on R:R NET of the round trip. Drafting on the gross
+                # figure lets through plans whose entire advertised edge is
+                # spent getting in and out — at a 1.0x ATR stop that is about
+                # 0.2R, against selection effects measured here at 0.05R.
+                econ = plan_economics(
+                    levels.trigger_price,
+                    levels.stop_planned,
+                    levels.target_planned,
+                    feat.get("atr_14"),
                 )
-                if expected_rr < setup["min_rr"]:
+                if econ is None or econ.rr_net < setup["min_rr"]:
                     continue
 
                 drafts.append(
@@ -139,7 +144,13 @@ def run_scan(top_n_per_setup: int | None = None, persist: bool = False) -> list[
                         "time_stop_bars": setup["time_stop_bars"],
                         "expires_on": levels.expires_on,
                         "invalidation": levels.invalidation,
-                        "expected_rr": round(expected_rr, 3),
+                        # expected_rr stays gross so the column keeps the
+                        # meaning rows written before this change carry; the
+                        # tradeable figure lives beside it rather than
+                        # silently replacing it.
+                        "expected_rr": round(econ.rr_gross, 3),
+                        "expected_rr_net": round(econ.rr_net, 3),
+                        "expected_cost_r": round(econ.cost_win_r + econ.cost_loss_r, 4),
                     }
                 )
                 n_for_setup += 1
