@@ -156,6 +156,17 @@ export function SetupPerformancePanel() {
       </p>
 
       <p className="muted footnote">
+        <strong>そして滑りは、利確したトレードに偏っています。</strong>
+        大きく窓を開けて始まった日は、目標までの残り距離が縮み、ストップまでの距離が伸びます。
+        つまり<strong>高く買わされたトレードほど利確に到達しやすく、しかも取れるRは小さい</strong>。
+        実測でも利確組の滑りは breakout 0.49R・reversal 1.32R に対し、
+        損切り組は breakout 0.15R・reversal −0.25R（＝トリガーより安く買えていた）。
+        <strong>安く入れたトレードが損切りになり、高く入れたトレードが小さく勝つ</strong>
+        という並びで、これが3つのSetupが純Rでプラスにならない直接の理由です。
+        利確の平均も、計画上の1.94R（breakout）に対し実測1.24Rまで落ちています。
+      </p>
+
+      <p className="muted footnote">
         <strong>「不成立」はSetupを運用するコストです。</strong>
         候補に出てもトリガーに到達せず期限切れになったもの、反証が先に成立したもの、
         翌寄りが既に損切り水準を割っていて建てられなかったものの合計。
