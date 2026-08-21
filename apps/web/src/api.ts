@@ -442,8 +442,13 @@ export interface SetupEdge {
   n_expired: number;
   n_invalidated: number;
   n_no_entry: number;
+  gross_avg_r: number | null;
+  avg_cost_r: number | null;
   avg_r: number | null;
   win_rate: number | null;
+  stop_atr_mult: number | null;
+  baseline_gross_avg_r: number | null;
+  baseline_avg_cost_r: number | null;
   baseline_avg_r: number | null;
   baseline_win_rate: number | null;
   baseline_n_trades: number | null;

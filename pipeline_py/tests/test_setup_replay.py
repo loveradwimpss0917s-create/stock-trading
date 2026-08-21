@@ -248,3 +248,59 @@ class TestBaselineIsAControl:
         )
         assert rows[0]["n_trades"] == 2
         assert "sum_r" in rows[0]
+
+
+class TestCostsAreChargedSymmetrically:
+    """Charging the Setup but not the control would hand the Setup a free
+    head start of roughly 0.1R — enough to invert the comparison on its
+    own, since the measured edges are all smaller than that."""
+
+    def _one_session(self):
+        code = "72030"
+        closes = [1000 + i * 5 for i in range(40)]
+        bars = {code: bars_from(closes)}
+        as_of = bars[code][24].date
+        return code, bars, as_of
+
+    def test_the_setup_path_records_a_cost(self):
+        code, bars, as_of = self._one_session()
+        rows = replay(
+            {as_of: {code: feat_row(ma_25=995.0)}},
+            bars,
+            {code: {"code": code}},
+            [BREAKOUT],
+            [as_of],
+            {(code, as_of): 5_000_000_000},
+        )
+        traded = [r for r in rows if r["cost_r"] is not None]
+        assert traded, "expected at least one filled plan to carry a cost"
+        assert all(r["cost_r"] > 0 for r in traded)
+
+    def test_the_control_path_records_a_cost_too(self):
+        code, bars, as_of = self._one_session()
+        rows = baseline(
+            {as_of: {code: feat_row()}},
+            bars,
+            {code: {"code": code}},
+            [BREAKOUT],
+            [as_of],
+            {(code, as_of): 5_000_000_000},
+        )
+        assert rows[0]["sum_cost_r"] > 0
+
+    def test_an_unfilled_plan_carries_no_cost(self):
+        # Never triggering means never paying a spread; a zero here would be
+        # averaged in as though a trade had happened.
+        code = "72030"
+        closes = [1000 + i * 5 for i in range(24)] + [900.0] * 16
+        bars = {code: bars_from(closes)}
+        as_of = bars[code][23].date
+        rows = replay(
+            {as_of: {code: feat_row(ma_25=closes[22] - 5)}},
+            bars,
+            {code: {"code": code}},
+            [BREAKOUT],
+            [as_of],
+            {(code, as_of): 5_000_000_000},
+        )
+        assert rows[0]["cost_r"] is None

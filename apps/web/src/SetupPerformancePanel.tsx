@@ -46,8 +46,9 @@ export function SetupPerformancePanel() {
     <section className="panel">
       <h2>Setupの検証</h2>
       <p className="muted footnote">
-        並び順・判定はすべて<strong>選別効果</strong>（Setup − 無選別に全銘柄を買った場合）で見ます。
-        検証期間は上昇相場なので、買いのみなら銘柄を選ばなくても平均Rはプラスになります。
+        すべて<strong>執行コスト差引後</strong>のRです。並び順・判定は
+        <strong>選別効果</strong>（Setup − 無選別に全銘柄を買った場合）で見ます。
+        検証期間は上昇相場なので、買いのみなら銘柄を選ばなくても総Rはプラスになります。
         Setupが超えるべき基準は0ではなく対照群です。
       </p>
 
@@ -58,8 +59,11 @@ export function SetupPerformancePanel() {
               <th>Setup</th>
               <th className="num">選別効果</th>
               <th className="num">t値</th>
-              <th className="num">Setup平均R</th>
-              <th className="num">対照群</th>
+              <th className="num">純R</th>
+              <th className="num">総R</th>
+              <th className="num">コスト</th>
+              <th className="num">損切幅</th>
+              <th className="num">対照群(純)</th>
               <th className="num">取引数</th>
               <th className="num">勝率</th>
               <th className="num">不成立</th>
@@ -82,7 +86,7 @@ export function SetupPerformancePanel() {
                     title={
                       unreadable
                         ? 'ばらつきの範囲内。差はあるが偶然と区別できない'
-                        : 'Setupの平均R − 無選別に買った場合の平均R'
+                        : 'Setupの純R − 無選別に買った場合の純R'
                     }
                   >
                     {r(s.edge_r)}
@@ -91,7 +95,22 @@ export function SetupPerformancePanel() {
                     {s.t_stat == null ? '—' : Number(s.t_stat).toFixed(2)}
                     {!notable && ' 〓'}
                   </td>
-                  <td className="num tabular">{r(s.avg_r)}</td>
+                  <td className={`num tabular ${(s.avg_r ?? 0) > 0 ? 'up' : 'down'}`}>
+                    {r(s.avg_r)}
+                  </td>
+                  <td className="num tabular muted">{r(s.gross_avg_r)}</td>
+                  <td
+                    className="num tabular down"
+                    title="往復のスリッページ・手数料をRで表したもの"
+                  >
+                    {s.avg_cost_r == null ? '—' : `−${Number(s.avg_cost_r).toFixed(3)}R`}
+                  </td>
+                  <td
+                    className="num tabular muted"
+                    title="損切りをATRの何倍に置いているか。狭いほどR単位のコストが膨らむ"
+                  >
+                    {s.stop_atr_mult == null ? '—' : `${Number(s.stop_atr_mult).toFixed(1)}×`}
+                  </td>
                   <td className="num tabular muted">{r(s.baseline_avg_r)}</td>
                   <td className="num tabular">{s.n_trades.toLocaleString('ja-JP')}</td>
                   <td className="num tabular">{pct(s.win_rate)}</td>
@@ -107,6 +126,14 @@ export function SetupPerformancePanel() {
           </tbody>
         </table>
       </div>
+
+      <p className="muted footnote">
+        <strong>損切りを狭くするとコストがR単位で膨らみます。</strong>
+        スリッページの単価は概ね ATR に比例するため価格に依存せず、往復コストは
+        <code> 2 × 0.10 ÷ 損切り倍率 </code>に収束します。損切り1.0×ATRなら約0.20R、
+        1.8×ATRなら約0.11R。<strong>同じ執行品質でも、損切りが狭いだけでコストは倍近くになります。</strong>
+        「損切りを浅くしてリスクを抑える」は、R単位では逆効果になり得ます。
+      </p>
 
       <p className="muted footnote">
         <strong>「不成立」はSetupを運用するコストです。</strong>

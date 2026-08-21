@@ -36,6 +36,7 @@ from typing import Optional
 
 from ..ingest.supabase_client import SupabaseUpsertClient
 from ..ingest.universe import is_operating_company
+from ..risk.cost_in_r import cost_in_r
 from ..screening.evaluate import Bar, evaluate
 from ..screening.run import FEATURE_COLUMNS
 from .rules import passes_candidate_rule, resolve_plan_levels
@@ -143,6 +144,18 @@ def replay(
                 if result is None:
                     continue
 
+                # Gross R is not takeable. A plan that never filled has no
+                # execution cost at all, so cost_r stays null there rather
+                # than defaulting to zero and being averaged in as a trade.
+                cost_r = None
+                if result.get("entry_fill") is not None and result.get("exit_price") is not None:
+                    cost_r = cost_in_r(
+                        result["entry_fill"],
+                        result["exit_price"],
+                        levels.stop_planned,
+                        float(feat["atr_14"]),
+                    )
+
                 rows.append(
                     {
                         "as_of": as_of,
@@ -157,6 +170,7 @@ def replay(
                         "bars_held": result.get("bars_held"),
                         "outcome": result["outcome"],
                         "r_multiple": result.get("r_multiple"),
+                        "cost_r": cost_r,
                     }
                 )
     return rows
@@ -203,7 +217,7 @@ def baseline(
             stop_mult = setup["stop_rule"]["mult"]
             target_mult = setup["target_rule"]["mult"]
 
-            acc = {"n": 0, "no_entry": 0, "sum_r": 0.0, "wins": 0}
+            acc = {"n": 0, "no_entry": 0, "sum_r": 0.0, "sum_cost_r": 0.0, "wins": 0}
             for code, feat in feats.items():
                 if code not in securities:
                     continue
@@ -224,18 +238,21 @@ def baseline(
 
                 close = bars[idx].close
                 atr = float(atr)
+                stop = close - stop_mult * atr
                 res = evaluate(
-                    bars,
-                    idx + 1,
-                    close - stop_mult * atr,
-                    close + target_mult * atr,
-                    setup["time_stop_bars"],
+                    bars, idx + 1, stop, close + target_mult * atr, setup["time_stop_bars"]
                 )
                 if res.outcome == "no_entry":
                     acc["no_entry"] += 1
                     continue
                 acc["n"] += 1
                 acc["sum_r"] += res.r_multiple or 0.0
+                # The control pays execution too. Charging the Setup but not
+                # the baseline would hand the Setup a free head start of
+                # roughly 0.1R and quietly invert the comparison.
+                if res.entry_fill is not None and res.exit_price is not None:
+                    c = cost_in_r(res.entry_fill, res.exit_price, stop, atr)
+                    acc["sum_cost_r"] += c or 0.0
                 if (res.r_multiple or 0.0) > 0:
                     acc["wins"] += 1
 
@@ -248,6 +265,7 @@ def baseline(
                     "n_trades": int(acc["n"]),
                     "n_no_entry": int(acc["no_entry"]),
                     "sum_r": round(acc["sum_r"], 6),
+                    "sum_cost_r": round(acc["sum_cost_r"], 6),
                     "n_wins": int(acc["wins"]),
                 }
             )
@@ -323,9 +341,22 @@ def main(argv: list[str] | None = None) -> int:
             sb = [b for b in base if b["setup_key"] == s["key"]]
             n = sum(b["n_trades"] for b in sb)
             if n:
+                gross = sum(b["sum_r"] for b in sb) / n
+                cost = sum(b["sum_cost_r"] for b in sb) / n
                 print(
                     f"[setup-replay] baseline {s['key']}: {n} trades, "
-                    f"avg {sum(b['sum_r'] for b in sb) / n:+.4f}R",
+                    f"gross {gross:+.4f}R  cost {cost:.4f}R  net {gross - cost:+.4f}R",
+                    flush=True,
+                )
+
+        for s in setups:
+            sr = [r for r in traded if r["setup_key"] == s["key"] and r["cost_r"] is not None]
+            if sr:
+                gross = sum(r["r_multiple"] or 0.0 for r in sr) / len(sr)
+                cost = sum(r["cost_r"] for r in sr) / len(sr)
+                print(
+                    f"[setup-replay] {s['key']}: {len(sr)} trades, "
+                    f"gross {gross:+.4f}R  cost {cost:.4f}R  net {gross - cost:+.4f}R",
                     flush=True,
                 )
 
