@@ -19,11 +19,14 @@ import { PlansPanel } from './PlansPanel';
 import { PositionsPanel } from './PositionsPanel';
 import { PriceChart } from './PriceChart';
 import { ReplayPanel } from './ReplayPanel';
+import { RiskLabPanel } from './RiskLabPanel';
 import { SetupPerformancePanel } from './SetupPerformancePanel';
 import { StrategyPanel } from './StrategyPanel';
 import { ThemePerformancePanel } from './ThemePerformancePanel';
 
-type Tab = 'home' | 'plans' | 'positions' | 'journal' | 'replay' | 'candidates' | 'results' | 'research';
+type Tab =
+  | 'home' | 'plans' | 'positions' | 'journal'
+  | 'risk' | 'replay' | 'candidates' | 'results' | 'research';
 
 function pctChange(quotes: DailyQuote[]): number | null {
   const closes = quotes.map((q) => (q.close === null ? NaN : Number(q.close))).filter((v) => !Number.isNaN(v));
@@ -122,6 +125,7 @@ export default function App() {
             ['plans', '計画'],
             ['positions', '建玉'],
             ['journal', 'ジャーナル'],
+            ['risk', 'リスク計算'],
             ['replay', 'リプレイ訓練'],
             ['candidates', 'テーマ別候補'],
             ['results', '結果'],
@@ -144,6 +148,7 @@ export default function App() {
       {tab === 'plans' && <PlansPanel />}
       {tab === 'positions' && <PositionsPanel />}
       {tab === 'journal' && <JournalPanel />}
+      {tab === 'risk' && <RiskLabPanel />}
       {tab === 'replay' && <ReplayPanel />}
       {tab === 'candidates' && <CandidatesPanel />}
       {tab === 'results' && (
