@@ -15,11 +15,26 @@ function yen(v: number | string | null | undefined): string {
 
 const DECISION_LABEL = { BUY: '買う', WAIT: '待つ', PASS: '見送る' } as const;
 
+// Every outcome walk_plan/evaluate can produce needs a label here. Before
+// this fix, 'expired' and 'invalidated' had none — a candidate that simply
+// never triggered rendered as a blank "—", indistinguishable from broken
+// data. For reversal_3d that is most rows (it fails to trigger ~69% of the
+// time), so most replay sessions looked like something was wrong when
+// nothing was: the Setup just didn't fire, which is itself the finding.
 const OUTCOME_LABEL: Record<string, { text: string; cls: string }> = {
   target: { text: '目標到達', cls: 'up' },
   stop: { text: '損切り', cls: 'down' },
-  timeout: { text: '期限切れ', cls: '' },
+  // Renamed from '期限切れ' — that phrase is now reserved for 'expired'
+  // below. This one DID trigger and become a real trade; it just ran out
+  // the clock before hitting either barrier. Conflating the two made a
+  // trade that happened look identical to one that never did.
+  timeout: { text: '保有上限で決済', cls: '' },
   no_entry: { text: '見送り(窓開け)', cls: 'muted' },
+  // Never triggered before its entry window ran out. No trade, no R —
+  // that absence is the candidate's own result, not missing data.
+  expired: { text: '不成立(未発火)', cls: 'muted' },
+  // The anti-thesis condition fired before the trigger did.
+  invalidated: { text: '反証成立', cls: 'muted' },
 };
 
 export function ReplayPanel() {
@@ -203,6 +218,13 @@ export function ReplayPanel() {
               </tbody>
             </table>
           </div>
+          <p className="muted footnote">
+            <strong>「不成立(未発火)」「反証成立」はRが「—」になりますが、データ欠損ではありません。</strong>
+            トリガーに到達しなかった、または反証条件が先に成立した——つまりそもそも取引が発生しなかった、
+            ということ自体がその候補の結果です。reversal_3dは実測で約7割がここに入るため、
+            1回のセッションで大半が「—」になるのは正常です。買う/待つと判断していても、
+            発火しなかった候補は評価しようがありません（勝ちでも負けでもない）。
+          </p>
           <p className="muted footnote">
             これは1セッション分の結果です。<strong>1回の答え合わせで「自分に才能がある/ない」は分かりません。</strong>
             何百回と繰り返して初めて、判断の傾向が見えてきます。
